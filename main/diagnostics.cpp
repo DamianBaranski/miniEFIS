@@ -25,6 +25,7 @@ static const char *TAG = "horizon";
 static const uint32_t TICK_MS = 100;
 static const uint32_t SYS_EVERY = 10;
 static const uint32_t HEADROOM_EVERY = 100;
+static const uint32_t HEAP_CHECK_EVERY = 10;
 
 /* Each sentence's column names, repeated this often so that a reader
  * joining part way learns them. */
@@ -65,6 +66,7 @@ struct Stats
 
 /* Writes found beside the framebuffers - see display_guard_check(). */
 static volatile uint32_t s_guard_hits = 0;
+static uint32_t s_heap_corrupt = 0;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static Stats s_stats;
@@ -307,10 +309,11 @@ static void send_system(const Stats &stats, uint32_t period_ms)
 static void report_headroom(void)
 {
     static const char *const tasks[] = {
-        "imu", "lvgl", "sensors", "imu_diag", "diag_stream", "esp_timer"
+        "imu", "lvgl", "sensors", "imu_diag", "diag_stream", "esp_timer",
+        "httpd", "wifi_debug", "wifi", "tiT", "sys_evt", "ipc0", "ipc1"
     };
 
-    char line[192];
+    char line[320];
     int used = snprintf(line, sizeof(line), "free stack, least ever:");
 
     for(size_t i = 0; i < sizeof(tasks) / sizeof(tasks[0]); i++)
@@ -365,6 +368,21 @@ static void diagnostics_task(void *argument)
 
         if(ticks % HEADROOM_EVERY == 0)
             report_headroom();
+
+        /*
+         * Something has twice corrupted the internal heap, found only
+         * later, by whatever task next allocated or freed beside it. With
+         * heap poisoning on (sdkconfig.defaults) every block carries a
+         * head and tail canary, and this walks them all: the first broken
+         * one is printed with its address, close in time to the write.
+         */
+        if(ticks % HEAP_CHECK_EVERY == 0 &&
+           !heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true))
+        {
+            s_heap_corrupt++;
+            ESP_LOGE(TAG, "internal heap corrupt (%lu so far)",
+                     (unsigned long)s_heap_corrupt);
+        }
 
         if(ticks % SYS_EVERY != 0)
             continue;

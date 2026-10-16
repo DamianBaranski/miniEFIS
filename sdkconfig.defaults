@@ -107,3 +107,13 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # Browsers send more than the default 512 bytes of request headers, and
 # the web server answers that with 431.
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+
+# Hunting an internal heap corruption that crashed the unit twice, both
+# times found only later by an unrelated task (in the Wi-Fi driver's
+# malloc, and freeing the panel's interrupt at the start of an update).
+# Light poisoning puts a canary at each end of every block, which
+# diagnostics.cpp checks every second; the end-of-stack watchpoint stops
+# a task the moment it runs off its stack, rather than when the damage
+# is next noticed. Both cheap enough to leave on.
+CONFIG_HEAP_POISONING_LIGHT=y
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y

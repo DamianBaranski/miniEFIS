@@ -4,6 +4,6 @@
 # clock, so that the same sources build and run on a host PC - see
 # test/CMakeLists.txt for the unit test build.
 idf_component_register(
-    SRCS "attitude_filter.cpp" "vertical_channel.cpp" "mag_calibration.cpp" "turn_coordinator.cpp" "navigator.cpp"
+    SRCS "attitude_filter.cpp" "vertical_channel.cpp" "mag_calibration.cpp" "turn_coordinator.cpp" "navigator.cpp" "mounting_alignment.cpp"
     INCLUDE_DIRS "include"
     REQUIRES esp_timer)

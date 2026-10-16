@@ -1,5 +1,6 @@
 #include "settings_screen.h"
 #include "fonts.h"
+#include "alignment.h"
 #include "altimeter_screen.h"
 #include "altitude_widget.h"
 #include "app_settings.h"
@@ -334,6 +335,130 @@ static void make_display_section(lv_obj_t *screen)
     show_brightness(app_settings().brightness);
 }
 
+/* ---- mounting --------------------------------------------------------------- */
+
+static lv_obj_t *s_level_status = NULL;
+static lv_obj_t *s_level_button = NULL;
+static lv_obj_t *s_level_clear_button = NULL;
+static lv_timer_t *s_level_timer = NULL;
+
+static void show_alignment(void)
+{
+    char text[96];
+
+    if(alignment_set())
+    {
+        float pitch, roll;
+        mountingTilt(alignment_get(), &pitch, &roll);
+
+        snprintf(text, sizeof(text),
+                 "Levelled - unit pitched %+.1f, rolled %+.1f deg",
+                 pitch, roll);
+        set_status(s_level_status, GOOD_COLOUR, text);
+        lv_obj_clear_state(s_level_clear_button, LV_STATE_DISABLED);
+    }
+    else
+    {
+        set_status(s_level_status, HINT_COLOUR,
+                   "Not levelled - unit taken as square in the panel");
+        lv_obj_add_state(s_level_clear_button, LV_STATE_DISABLED);
+    }
+}
+
+static void stop_levelling(void)
+{
+    if(s_level_timer != NULL)
+    {
+        lv_timer_del(s_level_timer);
+        s_level_timer = NULL;
+    }
+
+    lv_obj_clear_state(s_level_button, LV_STATE_DISABLED);
+}
+
+static void update_levelling(lv_timer_t *timer)
+{
+    (void)timer;
+
+    char text[96];
+
+    switch(alignment_level_poll())
+    {
+        case ALIGNMENT_MEASURING:
+            return;
+
+        case ALIGNMENT_DONE:
+            stop_levelling();
+            show_alignment();
+            return;
+
+        case ALIGNMENT_MOVED:
+            stop_levelling();
+            set_status(s_level_status, WARNING_COLOUR,
+                       "Moved while measuring - hold still, try again");
+            return;
+
+        case ALIGNMENT_TOO_STEEP:
+            stop_levelling();
+            snprintf(text, sizeof(text),
+                     "More than %.0f deg out - is the aircraft level?",
+                     ALIGNMENT_MAX_TILT_DEG);
+            set_status(s_level_status, FAILED_COLOUR, text);
+            return;
+
+        default:
+            stop_levelling();
+            show_alignment();
+            return;
+    }
+}
+
+static void on_level(lv_event_t *e)
+{
+    (void)e;
+
+    if(s_level_timer != NULL)
+        return;
+
+    alignment_level_start();
+
+    lv_obj_add_state(s_level_button, LV_STATE_DISABLED);
+    set_status(s_level_status, TEXT_COLOUR, "Measuring - hold still...");
+
+    s_level_timer = lv_timer_create(update_levelling, CALIBRATION_UPDATE_MS,
+                                    NULL);
+}
+
+static void on_level_clear(lv_event_t *e)
+{
+    (void)e;
+
+    if(s_level_timer != NULL)
+        return;
+
+    alignment_clear();
+    show_alignment();
+}
+
+static void make_mounting_section(lv_obj_t *screen)
+{
+    make_text(screen, FONT_BODY, SECTION_COLOUR, "MOUNTING");
+
+    s_level_status = make_text(screen, FONT_SMALL, HINT_COLOUR, "");
+
+    s_level_button = make_button(screen, "Set level", 220, on_level);
+    s_level_clear_button = make_button(screen, "Clear level", 220,
+                                       on_level_clear);
+
+    make_text(screen, FONT_SMALL, HINT_COLOUR,
+              "For a unit not square in the panel. With the aircraft "
+              "level - in flying attitude, on level ground - and still, "
+              "press Set level: the horizon then reads level. Takes a "
+              "few seconds; the gyro is measured again after it.");
+
+    show_alignment();
+}
+
 /* ---- Wi-Fi debug ---------------------------------------------------------- */
 
 static lv_obj_t *s_wifi_status = NULL;
@@ -509,6 +634,7 @@ void settings_screen_create(lv_obj_t *screen)
     make_text(screen, FONT_LARGE, TEXT_COLOUR, "SETTINGS");
 
     make_display_section(screen);
+    make_mounting_section(screen);
     make_wifi_section(screen);
 
     if(!mag_present())

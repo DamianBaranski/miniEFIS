@@ -82,8 +82,9 @@ navigator test flies the whole chain - attitude, heading, turn rate,
 slip, altitude - through a standard rate turn and a climb. The turn
 coordinator is checked against coordinated, slipping and skidding
 turns, the vertical channel against climbs, accelerometer errors and
-barometer dropouts, and the compass swing against a simulated sensor
-with known hard and soft iron errors.
+barometer dropouts, the compass swing against a simulated sensor
+with known hard and soft iron errors, and the mounting alignment
+against units tilted in the panel.
 
 `make host-tests` from the build directory runs them. They are also a
 standalone cmake project, which is useful when there is no ESP-IDF around
@@ -100,11 +101,16 @@ ctest --test-dir build-host --output-on-failure
 ```
 components/ahrs/      the estimators: attitude and altitude Kalman filters, turn
                       coordinator, the Navigator that runs them together,
-                      magnetometer calibration - portable C++, no dependencies
+                      magnetometer calibration, mounting alignment - portable
+                      C++, no dependencies
 components/board/     hardware: I2C, IO expander, display, touch, IMU, barometer,
                       magnetometer, ADC, LVGL port
-components/lvgl/      LVGL 8.3, vendored unmodified (configured from sdkconfig,
-                      NOT from its own lv_conf.h - see sdkconfig.defaults)
+components/lvgl/      LVGL 8.3, vendored without its docs, tests, demos and
+                      examples (configured from sdkconfig, NOT from its own
+                      lv_conf.h - see sdkconfig.defaults). The demos and
+                      examples include paths are dropped from
+                      env_support/cmake/esp.cmake to match; turning a demo on
+                      needs them back
 main/                 start-up, navigation (what every screen reads), sensors,
                       settings, Wi-Fi debug, logging, fast drawing
 main/screens/         one file pair per screen, the menu that switches them
@@ -242,7 +248,11 @@ snapshot (`tilt_sigma_deg`, `heading_sigma_deg`, `altitude_sigma_m`,
 
 Double tap the background of any screen to open the menu, which
 switches between the artificial horizon, the altimeter, the turn
-coordinator, the compass, settings and diagnostics; a tap outside the menu closes it. LVGL 8 has no double
+coordinator, the compass, settings and diagnostics; a tap outside the menu closes it.
+A swipe left or right steps through the four instruments - horizon,
+altimeter, turn coordinator, compass, and round again - but not
+settings or diagnostics; a swipe that starts on a control does not
+also press it. LVGL 8 has no double
 click event, so `main/screens/screen_manager.cpp` builds one from two short clicks within
 500 ms and 60 px of each other, caught on the screen object itself.
 Controls take their own taps, so anything drawn on a screen that should
@@ -279,15 +289,26 @@ crashed while building the menu. The start-up log prints the figure.
   lubber line and aircraft symbol, with the heading below it. It only
   redraws when the heading moves, and costs 35 ms a frame when it does.
   Without a calibrated magnetometer it says so instead of guessing.
-* **Settings** - units (m and m/s, or ft and ft/min), backlight, Wi-Fi
-  debug, and the magnetometer's calibration.
+* **Settings** - units (m and m/s, or ft and ft/min), backlight,
+  mounting alignment, Wi-Fi debug, and the magnetometer's calibration.
+
+  **Set level**, under MOUNTING, is for a unit not square in the panel:
+  with the aircraft level and still it averages gravity for two seconds,
+  and the rotation that takes it straight down is applied to every
+  sensor from then on (`main/alignment.cpp`, applied in `main/mounting.h`;
+  the maths in `components/ahrs/mounting_alignment.cpp`, with host
+  tests). The horizon, turn coordinator and heading then all work in the
+  aircraft's axes. It corrects pitch and roll of the installation up to
+  20 degrees, not yaw, which gravity cannot see. Pressing it again
+  refines it; the gyro is re-measured after each change.
 
 Settings are kept across restarts, and so is the screen last shown: the
 unit comes back where it was left. QNH, units, backlight and screen
 live in `main/app_settings.cpp`, written to NVS three seconds after the
 last change rather than on every one - holding the QNH button would
-otherwise write flash a dozen times a second. The magnetometer keeps
-its own record (`main/magnetometer.cpp`).
+otherwise write flash a dozen times a second. The magnetometer and the
+mounting alignment keep their own records (`main/magnetometer.cpp`,
+`main/alignment.cpp`).
 * **Diagnostics** - the raw readings: accelerometer and gyro in sensor
   axes, the magnetometer in uT and counts, the four ADC channels in
   counts and volts, the barometer, and read error counts.

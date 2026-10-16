@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.cpp"
+        "alignment.cpp"
         "app_settings.cpp"
         "crash_report.cpp"
         "diag_stream.cpp"

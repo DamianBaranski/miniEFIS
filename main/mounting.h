@@ -1,5 +1,6 @@
 #pragma once
 
+#include "alignment.h"
 #include "attitude_filter.h"
 
 /*
@@ -49,6 +50,10 @@
  *
  * If a value moves the right way at first and then creeps back, that
  * axis' gyro sign is inverted relative to the accelerometer.
+ *
+ * A unit not quite square in the panel is levelled from the settings
+ * screen, and that alignment applied on top of this mapping
+ * (alignment.h): "body" here is always the aircraft's axes.
  */
 static inline AttitudeVec3 sensor_to_body(float x, float y, float z)
 {
@@ -58,7 +63,8 @@ static inline AttitudeVec3 sensor_to_body(float x, float y, float z)
     body.y =  y;
     body.z = -x;
 
-    return body;
+    /* And from the unit as installed to the aircraft (alignment.h). */
+    return alignment_apply(body);
 }
 
 /* A rate or a field: just the axes. */
@@ -97,8 +103,10 @@ static inline AttitudeVec3 mag_to_body(const Vector &sensor)
 
 /* The other way: body axes into the magnetometer's - for gravity's
  * direction, which the compass swing needs in the magnetometer's axes. */
-static inline AttitudeVec3 body_to_mag(const AttitudeVec3 &body)
+static inline AttitudeVec3 body_to_mag(const AttitudeVec3 &aircraft)
 {
+    const AttitudeVec3 body = alignment_unapply(aircraft);
+
     /* mag_to_body() gives body = (-mag z, -mag x, +mag y). */
     AttitudeVec3 mag;
 

@@ -1,3 +1,4 @@
+#include "alignment.h"
 #include "app_settings.h"
 #include "altitude_widget.h"
 #include "horizon_screen.h"
@@ -67,6 +68,9 @@ static void imu_task(void *argument)
 
         const float dt_s = (float)interval_us * 1.0e-6f;
 
+        const AttitudeVec3 accel_body = accel_to_body(sample.accel_g);
+        const AttitudeVec3 gyro_body = sensor_to_body(sample.gyro_dps);
+
         if(mag_present() && (step++ % MAG_EVERY_N_STEPS) == 0)
         {
             mag_sample_t mag;
@@ -77,7 +81,7 @@ static void imu_task(void *argument)
              * calibrated there is no heading. */
             if(mag_status == ESP_OK && status == ESP_OK &&
                magnetometer_heading_sample(
-                   mag, accel_to_body(sample.accel_g), &mag_body))
+                   mag, accel_body, &mag_body))
                 mag_fresh = true;
 
             sensor_readings_record_mag(&mag, mag_status);
@@ -91,10 +95,11 @@ static void imu_task(void *argument)
          */
         if(status == ESP_OK)
         {
-            navigation_process_imu(accel_to_body(sample.accel_g),
-                                   sensor_to_body(sample.gyro_dps),
+            navigation_process_imu(accel_body, gyro_body,
                                    mag_fresh ? &mag_body : nullptr, dt_s);
             mag_fresh = false;
+
+            alignment_record(accel_body, gyro_body);
         }
 
         diagnostics_record_imu(&sample, status, interval_us);
@@ -157,6 +162,7 @@ extern "C" void app_main(void)
     settings_storage_init();
     app_settings_init();
     magnetometer_init();
+    alignment_init();
 
     ESP_ERROR_CHECK(board_init());
 
