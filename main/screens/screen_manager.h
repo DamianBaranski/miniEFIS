@@ -3,12 +3,15 @@
 #include "lvgl.h"
 
 /*
- * Screens, and the menu that switches between them.
+ * Screens, and the menu and swipes that switch between them.
  *
  * A double tap on any part of a screen that is not a control opens the
- * menu; a single tap outside it closes it again. Widgets on a screen
- * that should let taps through - instrument drawings, panels - must not
- * be clickable, so the tap falls through to the screen.
+ * menu; a single tap outside it closes it again. A swipe left or right
+ * steps through the instruments - not settings or diagnostics.
+ *
+ * Widgets on a screen that should let taps through - instrument
+ * drawings, panels - must not be clickable, so the tap falls through to
+ * the screen.
  *
  * Every screen is built once at start-up and kept, so switching is just
  * a matter of loading another one: in particular the

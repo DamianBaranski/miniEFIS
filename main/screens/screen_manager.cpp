@@ -103,6 +103,57 @@ static void on_tap(lv_event_t *e)
     s_last_tap_point = point;
 }
 
+/*
+ * A swipe left or right steps through the instruments, round and round:
+ * left for the next, right for the previous. Settings and diagnostics
+ * are not in the round - they are reached from the menu, and swiping
+ * on them does nothing.
+ */
+static const screen_id_t SWIPE_ORDER[] = {
+    SCREEN_HORIZON,
+    SCREEN_ALTIMETER,
+    SCREEN_TURN_COORDINATOR,
+    SCREEN_COMPASS,
+};
+
+static const int SWIPE_COUNT =
+    (int)(sizeof(SWIPE_ORDER) / sizeof(SWIPE_ORDER[0]));
+
+static void on_gesture(lv_event_t *e)
+{
+    (void)e;
+
+    if(menu_is_open())
+        return;
+
+    lv_indev_t *indev = lv_indev_get_act();
+    const lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+
+    if(dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT)
+        return;
+
+    int position = -1;
+
+    for(int i = 0; i < SWIPE_COUNT; i++)
+        if(SWIPE_ORDER[i] == s_current)
+            position = i;
+
+    if(position < 0)
+        return;
+
+    const int step = (dir == LV_DIR_LEFT) ? 1 : SWIPE_COUNT - 1;
+
+    /*
+     * The finger is still down. Without this its release would still
+     * count as a tap - half a double tap - or, if the swipe began on a
+     * control, as a press of it: the altimeter's setting would move.
+     */
+    lv_indev_wait_release(indev);
+    s_have_tap = false;
+
+    screen_manager_show(SWIPE_ORDER[(position + step) % SWIPE_COUNT]);
+}
+
 static void on_menu_button(lv_event_t *e)
 {
     const screen_id_t screen =
@@ -230,6 +281,8 @@ void screen_manager_create(lv_obj_t *horizon_screen)
     {
         lv_obj_add_flag(s_screens[i], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(s_screens[i], on_tap, LV_EVENT_SHORT_CLICKED,
+                            NULL);
+        lv_obj_add_event_cb(s_screens[i], on_gesture, LV_EVENT_GESTURE,
                             NULL);
     }
 
