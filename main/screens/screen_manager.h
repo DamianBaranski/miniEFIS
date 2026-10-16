@@ -1,0 +1,43 @@
+#pragma once
+
+#include "lvgl.h"
+
+/*
+ * Screens, and the menu that switches between them.
+ *
+ * A double tap on any part of a screen that is not a control opens the
+ * menu; a single tap outside it closes it again. Widgets on a screen
+ * that should let taps through - instrument drawings, panels - must not
+ * be clickable, so the tap falls through to the screen.
+ *
+ * Every screen is built once at start-up and kept, so switching is just
+ * a matter of loading another one: in particular the
+ * horizon is never torn down, because closing it would also reset the
+ * attitude filter and force a new gyro calibration.
+ *
+ * Runs in the LVGL task, like every other widget.
+ */
+
+typedef enum {
+    SCREEN_HORIZON = 0,
+    SCREEN_ALTIMETER,
+    SCREEN_TURN_COORDINATOR,
+    SCREEN_COMPASS,
+    SCREEN_SETTINGS,
+    SCREEN_DIAGNOSTICS,
+    SCREEN_COUNT
+} screen_id_t;
+
+/*
+ * horizon_screen is the screen the instrument has already been built on;
+ * the others are created here. Opens on the screen last shown, which is
+ * kept across restarts (app_settings.h).
+ */
+void screen_manager_create(lv_obj_t *horizon_screen);
+
+/* From the LVGL task. */
+void screen_manager_show(screen_id_t screen);
+
+/* From any task: shown at the LVGL task's next look, within 100 ms. For
+ * the Wi-Fi debug page, which runs in the web server's task. */
+void screen_manager_request(screen_id_t screen);

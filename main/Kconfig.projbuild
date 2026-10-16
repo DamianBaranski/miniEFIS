@@ -1,0 +1,41 @@
+menu "Wi-Fi debug"
+
+    config WIFI_DEBUG_SSID
+        string "Network to join"
+        default ""
+        help
+            The Wi-Fi network the unit joins when Wi-Fi debug is switched
+            on in the settings screen. Can be changed from the web page,
+            which keeps its own copy in NVS. Empty: go straight to the
+            unit's own access point.
+
+    config WIFI_DEBUG_PASSWORD
+        string "Password for that network"
+        default ""
+
+    config WIFI_DEBUG_AP_PASSWORD
+        string "Password for the unit's own access point"
+        default "miniefis"
+        help
+            Used when the network above cannot be joined. At least 8
+            characters (WPA2); anything shorter leaves the access point
+            open, and with it the firmware upload.
+
+endmenu
+
+menu "Compass"
+
+    config MAG_DIP_DEG
+        int "Magnetic dip where the unit is used, degrees"
+        range -90 90
+        default 67
+        help
+            The angle the earth's field points down into the ground,
+            positive north of the equator: 67 across Poland, 64-68 over
+            most of Europe. A world magnetic model gives it for anywhere.
+            The compass swing cannot measure the vertical magnetometer
+            offset, and takes it from this instead: a degree out costs a
+            couple of degrees of heading at 20 degrees of bank, nothing
+            level.
+
+endmenu

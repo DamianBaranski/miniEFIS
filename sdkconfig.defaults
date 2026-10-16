@@ -1,0 +1,109 @@
+# Target and flash
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# The two 480x480x16bpp framebuffers are 900 KB, so PSRAM is not
+# optional. This board carries octal PSRAM; switch to QUAD if yours
+# does not, and expect the RGB panel to struggle at that bandwidth.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# An RGB panel streaming straight out of PSRAM tears when a flash read
+# stalls its DMA, and jumps whenever flash is written - an update over
+# Wi-Fi, or saving settings - because writing flash turns the cache off,
+# and with it PSRAM, which the panel's bounce buffer is refilled from.
+#
+# ESP-IDF's RGB LCD documentation offers a cure: run code and constants
+# from PSRAM (XIP), so that flash writes need not turn the PSRAM cache
+# off, and make the panel's interrupt IRAM-safe so it keeps refilling
+# the bounce buffer meanwhile. On this board it is not enough - the
+# picture still jumped through an update, flash and PSRAM sharing one
+# bus - so an update stops using PSRAM for the picture altogether: the
+# panel generates it from internal RAM (main/screens/update_screen.h). That
+# needs the IRAM-safe interrupt, and its callbacks in IRAM - see
+# on_vsync() in lvgl_port.cpp.
+#
+# XIP stays for what it did do: drawing got faster.
+#
+# XIP was once tried here and measured 80 ms a redraw, from LVGL's
+# pixel loops being fetched from PSRAM while it is busy. With a 32 KB
+# instruction cache and 64 byte data cache lines it measured the other
+# way: a settings screen redraw went from about 60 ms to 40 ms. Both
+# caches come out of internal RAM - the 64 KB data cache took so much
+# that Wi-Fi was left with 18 KB, so it stays at 32 KB.
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+# Should the panel's DMA still lose its place - PSRAM too busy to refill
+# the bounce buffer in time - this restarts the transfer at the next
+# vertical sync, so the picture comes back in register instead of
+# staying shifted.
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+
+# The I2C driver's records in internal RAM, and its interrupt usable
+# while flash is being written. Left to the default they went to PSRAM,
+# where the touch controller's record landed in the gap beside a
+# framebuffer and was found overwritten - see display_st7701.cpp.
+CONFIG_I2C_ISR_IRAM_SAFE=y
+
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# 1 kHz tick: the IMU task asks for a 10 ms period, which at the default
+# 100 Hz tick would round to a single tick of quantisation error.
+CONFIG_FREERTOS_HZ=1000
+
+# LVGL's own examples and demos are not used here.
+CONFIG_LV_BUILD_EXAMPLES=n
+
+# LVGL is configured HERE, not in components/lvgl/src/lv_conf.h.
+#
+# LVGL's ESP-IDF integration defaults LV_CONF_SKIP to y, so lv_conf.h is
+# ignored and every setting comes from Kconfig - which is why the
+# vendored lv_conf.h sits there looking authoritative while having no
+# effect at all. Leave it that way: this Arduino-packaged copy keeps
+# LVGL's own examples under src/, which the ESP-IDF glob compiles, and
+# lv_conf.h enables them. They do not build clean under -Werror=format.
+#
+# So: to change an LVGL setting, add CONFIG_LV_* here. Editing
+# lv_conf.h will appear to work and will not.
+#
+# LVGL's own heap. Every screen is built at start-up and kept, which
+# took about 33 KB with four screens - the default 32 KB crashed on
+# boot. The start-up log prints the figure ("LVGL heap: ... used").
+CONFIG_LV_MEM_SIZE_KILOBYTES=64
+
+# Fonts: the sizes main/fonts.h uses, and the default (FONT_BODY's) for
+# labels that set none.
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_18=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_DEFAULT_MONTSERRAT_18=y
+
+# Keep a core dump of the last crash in flash (the coredump partition),
+# so a restart that happens away from the serial console can still be
+# diagnosed: the start-up log and the diagnostics screen summarise it.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# Updates over Wi-Fi (main/wifi_debug.h). A new image boots on trial
+# and is rolled back unless it confirms itself, so a broken update
+# cannot leave a unit with no USB connection unreachable.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Browsers send more than the default 512 bytes of request headers, and
+# the web server answers that with 431.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048

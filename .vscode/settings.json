@@ -1,0 +1,7 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}/test",
+    "cmake.buildDirectory": "${workspaceFolder}/build-host",
+    "files.associations": {
+        "*.h": "cpp"
+    }
+}
