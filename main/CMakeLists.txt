@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "alignment.cpp"
         "app_settings.cpp"
+        "can_bus.cpp"
         "crash_report.cpp"
         "diag_stream.cpp"
         "diagnostics.cpp"
@@ -27,6 +28,7 @@ idf_component_register(
     REQUIRES
         ahrs
         board
+        driver
         lvgl
         nvs_flash
         espcoredump

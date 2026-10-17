@@ -496,6 +496,15 @@ green circle, centred on the origin, and their centre is what is left
 of the hard iron. Two charts beside it give the field strength and dip,
 and the filter's heading against each sample's own.
 
+The CAN bus section shows what `main/can_bus.cpp` has received from the
+air data unit, the GPS and the engine units (`docs/CAN_PROTOCOL.md`):
+the bus state and its counters (frames per second, unknown IDs, bad
+lengths, bus errors, frames lost, error counters), then every message
+of the protocol with its ID, how long ago it last came - greyed out
+once past its timeout - how many have come, and its decoded values,
+`---` where the sender marked one not available. Below that are the
+nodes heard from by their heartbeat. `/can` serves the same as JSON.
+
 The log keeps the events: start-up, Wi-Fi, updates, warnings and
 errors, a write caught past a framebuffer, and every ten seconds the
 least free stack of each task and the least free internal heap.

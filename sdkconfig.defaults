@@ -117,3 +117,8 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 # is next noticed. Both cheap enough to leave on.
 CONFIG_HEAP_POISONING_LIGHT=y
 CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
+
+# CAN (main/can_bus.h) uses GPIO19/20, the USB pins - the USB connector
+# is not fitted. No console on USB-Serial-JTAG, so nothing else claims
+# them; the console stays on UART0 (IO43/IO44).
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

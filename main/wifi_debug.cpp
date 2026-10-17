@@ -1,5 +1,6 @@
 #include "wifi_debug.h"
 #include "app_settings.h"
+#include "can_bus.h"
 #include "crash_report.h"
 #include "screen_manager.h"
 #include "update_screen.h"
@@ -28,6 +29,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -267,6 +269,10 @@ white-space:pre-wrap;padding:8px;margin:0}
 #compass canvas{height:auto;aspect-ratio:1}
 .cs{font:12px monospace;color:#aab;margin-top:4px;min-height:3.5em;white-space:pre-wrap}
 .ok{color:#4f4}.bad{color:#fa4}
+#can{border-collapse:collapse;font:12px monospace}
+#can td,#can th{padding:2px 8px;border-bottom:1px solid #223;text-align:left;vertical-align:top}
+#can th{color:#aab;font-weight:normal}
+#can tr.stale td{color:#667}
 .W{color:#ffd400}.E{color:#ff5050}
 button,input{font:inherit;padding:5px 10px}
 progress{width:240px}
@@ -287,6 +293,11 @@ progress{width:240px}
 <div class="chart"><div class="t"><span>Levelled field, live, uT (forward up)</span></div>
 <canvas id="level"></canvas><div class="cs" id="levelstate"></div></div>
 </div>
+</section>
+<section>
+<h2>CAN bus <span id="canstate" style="font-weight:normal;color:#889">...</span></h2>
+<table id="can"></table>
+<div class="cs" id="cannodes"></div>
 </section>
 <section>
 <h2>Log <label style="font-weight:normal;color:#aab">
@@ -540,6 +551,37 @@ async function pollTel(){
 }
 pollTel();
 document.getElementById('window').onchange=()=>charts.forEach(draw);
+
+/* ---- CAN bus: every message received, its age and values ---- */
+function drawCan(c){
+  const b=c.bus;
+  document.getElementById('canstate').innerHTML=
+    mark(b.state==='running',b.state)+', '+(b.bitrate/1000)+' kbit/s, TX GPIO'+b.tx_pin+
+    ' RX GPIO'+b.rx_pin+' - '+b.frames_per_s+' frames/s, '+b.frames+' total, unknown '+
+    b.unknown+', bad length '+b.bad_length+', '+mark(!b.bus_errors,'bus errors '+b.bus_errors)+
+    ', lost '+b.rx_lost+', bus off '+b.bus_off+', error counters TX '+b.tec+' RX '+b.rec;
+  let h='<tr><th>ID</th><th>message</th><th>from</th><th>age</th><th>count</th><th>values</th></tr>';
+  for(const m of c.msgs){
+    const age=m.age_ms===null?'never':m.age_ms<10000?m.age_ms+' ms':(m.age_ms/1000).toFixed(0)+' s';
+    let v=Object.entries(m.v).map(([k,x])=>k+' '+(x===null?'---':x)).join('  ');
+    if(m.name==='GPS_TIME'&&m.count&&(m.v.flags&1))
+      v+='  '+new Date(m.v.utc_s*1000+m.v.ms).toISOString();
+    h+='<tr class="'+(m.fresh?'':'stale')+'"><td>0x'+m.id.toString(16).toUpperCase().padStart(3,'0')+
+      '</td><td>'+m.name+'</td><td>'+m.from+'</td><td>'+(m.count?mark(m.fresh,age):age)+
+      '</td><td>'+m.count+'</td><td>'+(m.count?v:'')+'</td></tr>';
+  }
+  document.getElementById('can').innerHTML=h;
+  const T={2:'GPS',3:'air data',4:'engine unit'},S=['booting','running','degraded','fault'];
+  document.getElementById('cannodes').innerHTML=c.nodes.length?'nodes: '+c.nodes.map(n=>
+    mark(n.fresh&&n.state===1,'#'+n.node+' '+(T[n.type]||'type '+n.type)+' '+(S[n.state]||n.state)+
+      ', fw '+n.fw+', up '+n.uptime_s+' s'+(n.fresh?'':' - gone'))).join('   '):'no heartbeats heard';
+}
+async function pollCan(){
+  try{const c=await(await fetch('/can')).json();if(!paused)drawCan(c);}
+  catch(e){document.getElementById('canstate').textContent='not responding';}
+  setTimeout(pollCan,1000);
+}
+pollCan();
 poll();status();setInterval(status,3000);
 </script></body></html>
 )html";
@@ -879,6 +921,257 @@ static esp_err_t handle_compass(httpd_req_t *req)
                               "too long");
 
     free(snap);
+    free(json);
+
+    return err;
+}
+
+/* ---- CAN bus -------------------------------------------------------------- */
+
+static const char *can_state_name(can_bus_state_t state)
+{
+    switch(state)
+    {
+    case CAN_BUS_RUNNING:       return "running";
+    case CAN_BUS_ERROR_PASSIVE: return "error passive";
+    case CAN_BUS_BUS_OFF:       return "bus off, recovering";
+    default:                    return "not started";
+    }
+}
+
+/*
+ * GET /can: everything received from the CAN bus - the bus's own
+ * counters, then every message of the protocol with how long ago it
+ * last came, whether that is still within its timeout, and its values
+ * (null where the sender marked one not available), then the nodes
+ * heard from. JSON.
+ */
+static esp_err_t handle_can(httpd_req_t *req)
+{
+    can_data_t *data = (can_data_t *)
+        heap_caps_malloc(sizeof(can_data_t), MALLOC_CAP_SPIRAM);
+
+    static const size_t JSON_BYTES = 12 * 1024;
+    char *json = (char *)heap_caps_malloc(JSON_BYTES, MALLOC_CAP_SPIRAM);
+
+    if(data == NULL || json == NULL)
+    {
+        free(data);
+        free(json);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "out of memory");
+    }
+
+    can_bus_get(data);
+    const int64_t now_us = esp_timer_get_time();
+
+    size_t n = 0;
+
+    auto add = [&](const char *format, auto... values) {
+        if(n < JSON_BYTES)
+            n += snprintf(json + n, JSON_BYTES - n, format, values...);
+    };
+
+    /* A value, or null for "not available" - JSON has no NaN. */
+    auto value = [&](const char *key, double v, int decimals) {
+        if(isfinite(v))
+            add("\"%s\":%.*f,", key, decimals, v);
+        else
+            add("\"%s\":null,", key);
+    };
+
+    /* The comma the last value left, before a closing bracket. */
+    auto close = [&](const char *bracket) {
+        if(n > 0 && n < JSON_BYTES && json[n - 1] == ',')
+            n--;
+        add("%s", bracket);
+    };
+
+    auto message = [&](unsigned id, const char *name, const char *from,
+                       const can_stamp_t &stamp, uint32_t period_ms) {
+        add("{\"id\":%u,\"name\":\"%s\",\"from\":\"%s\",\"period_ms\":%lu,"
+            "\"count\":%lu,",
+            id, name, from, (unsigned long)period_ms,
+            (unsigned long)stamp.count);
+
+        if(stamp.count > 0)
+            add("\"age_ms\":%lld,",
+                (long long)((now_us - stamp.rx_us) / 1000));
+        else
+            add("\"age_ms\":null,");
+
+        add("\"fresh\":%s,\"v\":{",
+            can_fresh(&stamp, now_us, period_ms) ? "true" : "false");
+    };
+
+    const can_bus_stats_t &bus = data->bus;
+
+    add("{\"bus\":{\"state\":\"%s\",\"bitrate\":%d,\"tx_pin\":%d,"
+        "\"rx_pin\":%d,\"frames\":%lu,\"frames_per_s\":%lu,"
+        "\"unknown\":%lu,\"bad_length\":%lu,\"bus_errors\":%lu,"
+        "\"rx_lost\":%lu,\"bus_off\":%lu,\"tec\":%lu,\"rec\":%lu},",
+        can_state_name(bus.state), BOARD_CAN_BITRATE, BOARD_CAN_TX_PIN,
+        BOARD_CAN_RX_PIN, (unsigned long)bus.frames,
+        (unsigned long)bus.frames_per_s, (unsigned long)bus.unknown_frames,
+        (unsigned long)bus.bad_length, (unsigned long)bus.bus_errors,
+        (unsigned long)bus.rx_lost, (unsigned long)bus.bus_off_count,
+        (unsigned long)bus.tx_error_counter,
+        (unsigned long)bus.rx_error_counter);
+
+    add("\"msgs\":[");
+
+    const can_air_data_t &air = data->air;
+    message(0x100, "DIFF_PRESSURE", "air data", air.stamp, CAN_PERIOD_AIR_MS);
+    value("diff_pa", air.diff_pa, 2);
+    value("sensor_c", air.sensor_temp_c, 2);
+    add("\"status\":%u,\"sequence\":%u,\"lost\":%lu",
+        air.status, air.sequence, (unsigned long)air.sequence_gaps);
+    close("}},");
+
+    const can_oat_t &oat = data->oat;
+    message(0x101, "OAT", "air data", oat.stamp, CAN_PERIOD_OAT_MS);
+    value("oat_c", oat.oat_c, 2);
+    value("humidity_pct", oat.humidity_pct, 2);
+    close("}},");
+
+    const can_gps_t &gps = data->gps;
+    message(0x200, "GPS_POSITION", "GPS", gps.position_stamp,
+            CAN_PERIOD_GPS_MS);
+    value("lat_deg", gps.latitude_deg, 7);
+    value("lon_deg", gps.longitude_deg, 7);
+    close("}},");
+
+    message(0x201, "GPS_VELOCITY", "GPS", gps.velocity_stamp,
+            CAN_PERIOD_GPS_MS);
+    value("gs_ms", gps.ground_speed_ms, 2);
+    value("track_deg", gps.track_deg, 2);
+    value("vs_ms", gps.vertical_speed_ms, 2);
+    add("\"fix\":%u,\"fix_type\":%u", gps.velocity_fix_sequence,
+        gps.fix_type);
+    close("}},");
+
+    message(0x202, "GPS_ALTITUDE", "GPS", gps.altitude_stamp,
+            CAN_PERIOD_GPS_MS);
+    value("alt_msl_m", gps.altitude_msl_m, 3);
+    value("geoid_m", gps.geoid_separation_m, 1);
+    add("\"fix\":%u", gps.altitude_fix_sequence);
+    close("}},");
+
+    message(0x203, "GPS_QUALITY", "GPS", gps.quality_stamp,
+            CAN_PERIOD_GPS_SLOW_MS);
+    value("sats", gps.satellites == 0xFF ? NAN : gps.satellites, 0);
+    value("hdop", gps.hdop, 1);
+    value("hacc_m", gps.horizontal_accuracy_m, 2);
+    value("vacc_m", gps.vertical_accuracy_m, 2);
+    value("sacc_ms", gps.speed_accuracy_ms, 2);
+    close("}},");
+
+    message(0x204, "GPS_TIME", "GPS", gps.time_stamp, CAN_PERIOD_GPS_SLOW_MS);
+    add("\"utc_s\":%lu,\"ms\":%u,\"flags\":%u",
+        (unsigned long)gps.utc_s, gps.utc_ms, gps.time_flags);
+    close("}},");
+
+    for(int e = 0; e < CAN_ENGINES; e++)
+    {
+        const can_engine_t &engine = data->engine[e];
+        const unsigned base = 0x300 + 0x20 * e;
+        const char *from = (e == 0) ? "engine 1" : "engine 2";
+
+        /* Engine 2 only once it has been heard from. */
+        if(e > 0 && engine.fast_stamp.count == 0 &&
+           engine.slow_stamp.count == 0)
+            continue;
+
+        message(base + 0, "ENGINE_FAST", from, engine.fast_stamp,
+                CAN_PERIOD_ENGINE_FAST_MS);
+        value("rpm", engine.rpm, 0);
+        value("map_kpa", engine.manifold_kpa, 2);
+        value("oil_kpa", engine.oil_pressure_kpa, 1);
+        value("fuel_kpa", engine.fuel_pressure_kpa, 1);
+        close("}},");
+
+        message(base + 1, "ENGINE_SLOW", from, engine.slow_stamp,
+                CAN_PERIOD_ENGINE_SLOW_MS);
+        value("oil_c", engine.oil_temp_c, 1);
+        value("coolant_c", engine.coolant_temp_c, 1);
+        value("flow_lph", engine.fuel_flow_lph, 2);
+        value("volts", engine.bus_volts, 2);
+        close("}},");
+
+        message(base + 2, "EGT_1_4", from, engine.egt_stamp,
+                CAN_PERIOD_ENGINE_SLOW_MS);
+        for(int i = 0; i < 4; i++)
+        {
+            char key[8];
+            snprintf(key, sizeof(key), "egt%d_c", i + 1);
+            value(key, engine.egt_c[i], 1);
+        }
+        close("}},");
+
+        message(base + 3, "CHT_1_4", from, engine.cht_stamp,
+                CAN_PERIOD_ENGINE_SLOW_MS);
+        for(int i = 0; i < 4; i++)
+        {
+            char key[8];
+            snprintf(key, sizeof(key), "cht%d_c", i + 1);
+            value(key, engine.cht_c[i], 1);
+        }
+        close("}},");
+
+        message(base + 4, "CYL_5_6", from, engine.cyl56_stamp,
+                CAN_PERIOD_ENGINE_SLOW_MS);
+        value("egt5_c", engine.egt_c[4], 1);
+        value("egt6_c", engine.egt_c[5], 1);
+        value("cht5_c", engine.cht_c[4], 1);
+        value("cht6_c", engine.cht_c[5], 1);
+        close("}},");
+
+        message(base + 5, "FUEL_ELECTRICAL", from, engine.fuel_stamp,
+                CAN_PERIOD_FUEL_MS);
+        value("fuel_left_l", engine.fuel_left_l, 1);
+        value("fuel_right_l", engine.fuel_right_l, 1);
+        value("amps", engine.battery_amps, 2);
+        value("intake_c", engine.intake_temp_c, 1);
+        close("}},");
+
+        message(base + 6, "ENGINE_TOTALS", from, engine.totals_stamp,
+                CAN_PERIOD_TOTALS_MS);
+        value("engine_s", engine.engine_time_s == 0xFFFFFFFFu
+                              ? NAN : (double)engine.engine_time_s, 0);
+        value("used_l", engine.fuel_used_l, 1);
+        value("endurance_min", engine.endurance_min, 0);
+        close("}},");
+    }
+
+    close("],\"nodes\":[");
+
+    for(int i = 0; i < CAN_NODES; i++)
+    {
+        const can_node_t &node = data->node[i];
+
+        if(node.stamp.count == 0)
+            continue;
+
+        add("{\"node\":%d,\"type\":%u,\"state\":%u,\"fw\":\"%u.%u\","
+            "\"uptime_s\":%lu,\"age_ms\":%lld,\"fresh\":%s},",
+            i, node.device_type, node.state, node.firmware >> 8,
+            node.firmware & 0xFF, (unsigned long)node.uptime_s,
+            (long long)((now_us - node.stamp.rx_us) / 1000),
+            can_fresh(&node.stamp, now_us, CAN_PERIOD_HEARTBEAT_MS)
+                ? "true" : "false");
+    }
+
+    close("]}");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    const esp_err_t err = (n < JSON_BYTES)
+        ? httpd_resp_send(req, json, (ssize_t)n)
+        : httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                              "too long");
+
+    free(data);
     free(json);
 
     return err;
@@ -1296,6 +1589,7 @@ static void start_server(void)
         { "/stream",   HTTP_GET,  handle_stream,   NULL },
         { "/telemetry", HTTP_GET, handle_telemetry, NULL },
         { "/compass",  HTTP_GET,  handle_compass,  NULL },
+        { "/can",      HTTP_GET,  handle_can,      NULL },
         { "/screenshot.bmp", HTTP_GET, handle_screenshot, NULL },
         { "/screen",   HTTP_GET,  handle_screen,   NULL },
         { "/coredump", HTTP_GET,  handle_coredump, NULL },

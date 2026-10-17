@@ -1,5 +1,6 @@
 #include "alignment.h"
 #include "app_settings.h"
+#include "can_bus.h"
 #include "altitude_widget.h"
 #include "horizon_screen.h"
 #include "board.h"
@@ -173,6 +174,7 @@ extern "C" void app_main(void)
 
     diagnostics_start();
     sensor_readings_start();
+    can_bus_start();
     diag_stream_start();
 
     const BaseType_t created = xTaskCreatePinnedToCore(

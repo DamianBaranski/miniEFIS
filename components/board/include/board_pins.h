@@ -40,6 +40,16 @@
 /* ---- Touch ---- */
 #define BOARD_TOUCH_INT_PIN         16
 
+/*
+ * ---- CAN (TWAI), to an external 3.3 V transceiver ----
+ * The ESP32-S3's USB pins: the USB connector is not fitted on this unit.
+ * TX on GPIO20 (D+), whose USB pull-up holds the bus recessive from
+ * reset until the driver starts. docs/CAN_PROTOCOL.md.
+ */
+#define BOARD_CAN_TX_PIN            20
+#define BOARD_CAN_RX_PIN            19
+#define BOARD_CAN_BITRATE           500000
+
 /* ---- RGB panel geometry and timing ---- */
 #define BOARD_LCD_WIDTH             480
 #define BOARD_LCD_HEIGHT            480
