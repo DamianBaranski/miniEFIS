@@ -218,19 +218,22 @@ void fast_draw_text(
     dsc.color = color;
     dsc.font = font;
 
+    /* UTF-8: the degree sign is two bytes. */
     lv_coord_t total_width = 0;
+    uint32_t i = 0;
+    uint32_t glyph;
 
-    for(const char *c = text; *c != '\0'; c++)
-        total_width += (lv_coord_t)lv_font_get_glyph_width(font, (uint8_t)*c, 0);
+    while((glyph = _lv_txt_encoded_next(text, &i)) != 0)
+        total_width += (lv_coord_t)lv_font_get_glyph_width(font, glyph, 0);
 
     lv_point_t pen;
     pen.x = (lv_coord_t)(px - total_width / 2);
     pen.y = (lv_coord_t)(py - font->line_height / 2);
 
-    for(const char *c = text; *c != '\0'; c++)
-    {
-        const uint32_t glyph = (uint8_t)*c;
+    i = 0;
 
+    while((glyph = _lv_txt_encoded_next(text, &i)) != 0)
+    {
         lv_draw_letter(draw_ctx, &dsc, &pen, glyph);
 
         pen.x += (lv_coord_t)lv_font_get_glyph_width(font, glyph, 0);

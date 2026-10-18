@@ -52,6 +52,15 @@ esp_err_t lvgl_port_stop(uint32_t timeout_ms);
  */
 const void *lvgl_port_shown_frame(void);
 
+/*
+ * A touch as if on the panel, for testing from the debug page: pressed
+ * for duration_ms, moving in a straight line from (x1, y1) to (x2, y2) -
+ * a tap when they are the same, a swipe when not. It takes the panel's
+ * place while it lasts. Any task.
+ */
+void lvgl_port_inject_touch(int x1, int y1, int x2, int y2,
+                            uint32_t duration_ms);
+
 /* Reads the counters and resets them. Safe from any task. */
 void lvgl_port_take_stats(lvgl_port_stats_t *stats);
 

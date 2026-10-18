@@ -4,7 +4,7 @@
 
 /*
  * The user's settings, kept in NVS so they survive a restart: the screen
- * last shown, the screens hidden, units, the altimeter setting (QNH),
+ * last shown, the screens hidden, the engine type, units, the altimeter setting (QNH),
  * the backlight and whether Wi-Fi debug is on.
  * The magnetometer's mounting and calibration are kept separately, by
  * magnetometer.cpp.
@@ -29,6 +29,9 @@ typedef struct {
     uint8_t brightness;     /* percent */
     bool wifi_debug;        /* wifi_debug.h */
     uint8_t hidden_screens; /* bit per screen_id_t: left out of the swipes and menu */
+    uint8_t engine_type;    /* engine_type_t, engine_limits.h */
+    uint16_t engine_items;  /* bit per engine_item_t shown; 0: the type's */
+    uint8_t engine_flags;   /* ENGINE_HIDE_* */
 } app_settings_t;
 
 /* Load, or fall back to defaults. Call once nvs_flash_init() has run. */
@@ -42,3 +45,6 @@ void app_settings_set_qnh(float pascals);
 void app_settings_set_brightness(uint8_t percent);
 void app_settings_set_wifi_debug(bool enabled);
 void app_settings_set_hidden_screens(uint8_t mask);
+void app_settings_set_engine_type(uint8_t type);
+void app_settings_set_engine_items(uint16_t items);
+void app_settings_set_engine_flags(uint8_t flags);

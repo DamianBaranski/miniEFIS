@@ -12,8 +12,9 @@ warnings are decided on the EFIS from the values it receives.
 
 Status: receiving is implemented (`main/can_bus.cpp`, shown on the debug
 web page and at `GET /can`). The HSI screen uses the GPS messages
-(0x200-0x202); the other screens and the attitude filter do not use the
-data yet, and the CAN BUS setting is not there yet.
+(0x200-0x202), and the engine and cylinders screens engine 1's
+(0x300-0x306). The other screens and the attitude filter do not use the
+data yet, nor engine 2, and the CAN BUS setting is not there yet.
 
 ## 1. Physical layer
 
@@ -273,6 +274,12 @@ pilot watches them.
 | 4 | u16 | Fuel used since power-up | 0.1 L |
 | 6 | u16 | Fuel remaining at the current flow (endurance) | 1 min |
 
+`tools/emu_emulator.py` emulates this node, engine 1 or 2, through a
+USB-CAN adapter. A Rotax 912, Lycoming O-320 or IO-540 flies a whole
+flight from a cold start, or holds a set RPM. `--fault` adds low oil
+pressure, a hot cylinder, a broken EGT probe, a dead alternator or low
+fuel.
+
 ## 5. Heartbeat
 
 **`0x700 + node` HEARTBEAT**, 1 Hz, from every sensor node
@@ -284,7 +291,7 @@ pilot watches them.
 | 2 | u16 | Firmware version, major.minor as `major << 8 \| minor` |
 | 4 | u32 | Uptime, seconds |
 
-The EFIS lists the nodes it hears on the Diagnostics screen. A node
+The EFIS lists the nodes it hears on the debug web page and at `GET /can`. A node
 that misses three heartbeats is shown as gone.
 
 ## 6. Using it on the MiniEFIS
@@ -315,7 +322,7 @@ that misses three heartbeats is shown as gone.
 * **GPS.** Ground speed and track go on the compass screen. GPS altitude
   is used as a cross-check against the baro altitude, not as a
   replacement for it.
-* **Engine.** A new engine screen, added to the swipe order after the
-  compass. Green, amber and red ranges for each value are set on the
+* **Engine.** The engine and cylinders screens, in the swipe order
+  after the HSI. Green, amber and red ranges for each value are set on the
   EFIS, and the EFIS raises any warning from them itself. Nothing on the
   bus tells it a value is out of range.

@@ -5,7 +5,7 @@ Live charts from the instrument's serial stream.
 The firmware streams 20 samples a second on the serial console while
 one of two screens is showing (main/diag_stream.h has the format):
 
-  Diagnostics screen -> $DIAG lines, every sensor raw
+  Settings > Compass page -> $DIAG lines, every sensor raw
   Compass screen     -> $COMP lines, everything the heading is made of
 
 This reads them and draws the matching view, switching by itself when
@@ -737,7 +737,8 @@ class Window:
         samples = self.stream.snapshot(self.view.kind)
 
         if not samples:
-            screen = "Diagnostics" if self.view.kind == "DIAG" else "Compass"
+            screen = ("Settings > Compass" if self.view.kind == "DIAG"
+                      else "Compass")
             self.title.set_text(f"waiting for ${self.view.kind} lines - open "
                                 f"the {screen} screen on the device")
             return
@@ -805,7 +806,7 @@ def main():
         print(f"{stream.received} samples, {stream.rejected} bad lines, "
               f"saved {args.save}")
         if stream.received == 0:
-            print("no samples: open the Diagnostics or Compass screen on "
+            print("no samples: open Settings > Compass or the Compass screen on "
                   "the device", file=sys.stderr)
             sys.exit(1)
     else:

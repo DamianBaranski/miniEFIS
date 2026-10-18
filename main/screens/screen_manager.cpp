@@ -3,7 +3,7 @@
 #include "altimeter_screen.h"
 #include "app_settings.h"
 #include "compass_screen.h"
-#include "diagnostics_screen.h"
+#include "engine_screen.h"
 #include "hsi_screen.h"
 #include "settings_screen.h"
 #include "turn_coordinator_screen.h"
@@ -32,8 +32,9 @@ static const char *const SCREEN_NAMES[SCREEN_COUNT] = {
     "Turn coordinator",
     "Compass",
     "HSI",
+    "Engine",
+    "Cylinders",
     "Settings",
-    "Diagnostics",
 };
 
 static lv_obj_t *s_screens[SCREEN_COUNT];
@@ -112,9 +113,10 @@ static void on_tap(lv_event_t *e)
 
 /*
  * A swipe left or right steps through the instruments, round and round:
- * left for the next, right for the previous. Settings and diagnostics
- * are not in the round - they are reached from the menu, and swiping
- * on them does nothing. A swipe down on the HSI opens its route menu.
+ * left for the next, right for the previous. Settings is not in the
+ * round - it is reached from the menu, and swiping on it does nothing.
+ * A swipe down on the HSI opens its route menu, on the engine screens
+ * what they show.
  */
 static const screen_id_t SWIPE_ORDER[] = {
     SCREEN_HORIZON,
@@ -122,6 +124,8 @@ static const screen_id_t SWIPE_ORDER[] = {
     SCREEN_TURN_COORDINATOR,
     SCREEN_COMPASS,
     SCREEN_HSI,
+    SCREEN_ENGINE,
+    SCREEN_CYLINDERS,
 };
 
 static const int SWIPE_COUNT =
@@ -158,6 +162,16 @@ static void on_gesture(lv_event_t *e)
         lv_indev_wait_release(indev);
         s_have_tap = false;
         hsi_screen_open_menu();
+        return;
+    }
+
+    /* And on the engine screens: what they show. */
+    if(dir == LV_DIR_BOTTOM &&
+       (s_current == SCREEN_ENGINE || s_current == SCREEN_CYLINDERS))
+    {
+        lv_indev_wait_release(indev);
+        s_have_tap = false;
+        engine_screen_open_menu();
         return;
     }
 
@@ -230,8 +244,8 @@ static void create_menu(void)
 
     s_menu = lv_obj_create(lv_layer_top());
 
-    /* Two columns: seven screens in one would run off the round panel. */
-    lv_obj_set_size(s_menu, 340, LV_SIZE_CONTENT);
+    /* Two columns: eight screens in one would run off the round panel. */
+    lv_obj_set_size(s_menu, 320, LV_SIZE_CONTENT);
     lv_obj_center(s_menu);
     lv_obj_clear_flag(s_menu, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -240,9 +254,9 @@ static void create_menu(void)
     lv_obj_set_style_border_color(s_menu, lv_color_hex(MENU_BORDER_COLOUR), 0);
     lv_obj_set_style_border_width(s_menu, 2, 0);
     lv_obj_set_style_radius(s_menu, 20, 0);
-    lv_obj_set_style_pad_all(s_menu, 16, 0);
-    lv_obj_set_style_pad_row(s_menu, 10, 0);
-    lv_obj_set_style_pad_column(s_menu, 10, 0);
+    lv_obj_set_style_pad_all(s_menu, 14, 0);
+    lv_obj_set_style_pad_row(s_menu, 8, 0);
+    lv_obj_set_style_pad_column(s_menu, 8, 0);
 
     lv_obj_set_flex_flow(s_menu, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(s_menu, LV_FLEX_ALIGN_START,
@@ -261,7 +275,7 @@ static void create_menu(void)
     {
         lv_obj_t *button = lv_btn_create(s_menu);
 
-        lv_obj_set_size(button, 144, 58);
+        lv_obj_set_size(button, 140, 48);
         lv_obj_set_style_radius(button, 12, 0);
         lv_obj_set_style_shadow_width(button, 0, 0);
 
@@ -315,11 +329,14 @@ void screen_manager_create(lv_obj_t *horizon_screen)
     s_screens[SCREEN_HSI] = create_screen();
     hsi_screen_create(s_screens[SCREEN_HSI]);
 
+    s_screens[SCREEN_ENGINE] = create_screen();
+    engine_screen_create(s_screens[SCREEN_ENGINE]);
+
+    s_screens[SCREEN_CYLINDERS] = create_screen();
+    cylinders_screen_create(s_screens[SCREEN_CYLINDERS]);
+
     s_screens[SCREEN_SETTINGS] = create_screen();
     settings_screen_create(s_screens[SCREEN_SETTINGS]);
-
-    s_screens[SCREEN_DIAGNOSTICS] = create_screen();
-    diagnostics_screen_create(s_screens[SCREEN_DIAGNOSTICS]);
 
     for(int i = 0; i < SCREEN_COUNT; i++)
     {
@@ -361,13 +378,15 @@ void screen_manager_show(screen_id_t screen)
     app_settings_set_screen((uint8_t)screen);
 }
 
-/* Set from any task, acted on by the LVGL task; -1 for nothing asked. */
+/* Set from any task, acted on by the LVGL task; -1 for nothing asked.
+ * The screen, with REQUEST_MENU for its menu too. */
 static volatile int s_requested = -1;
+static const int REQUEST_MENU = 0x100;
 
-void screen_manager_request(screen_id_t screen)
+void screen_manager_request(screen_id_t screen, bool open_menu)
 {
     if(screen < SCREEN_COUNT)
-        s_requested = (int)screen;
+        s_requested = (int)screen | (open_menu ? REQUEST_MENU : 0);
 }
 
 static void take_request(lv_timer_t *timer)
@@ -381,7 +400,18 @@ static void take_request(lv_timer_t *timer)
 
     s_requested = -1;
     menu_close();
-    screen_manager_show((screen_id_t)requested);
+
+    const screen_id_t screen = (screen_id_t)(requested & ~REQUEST_MENU);
+
+    screen_manager_show(screen);
+
+    if((requested & REQUEST_MENU) == 0)
+        return;
+
+    if(screen == SCREEN_HSI)
+        hsi_screen_open_menu();
+    else if(screen == SCREEN_ENGINE || screen == SCREEN_CYLINDERS)
+        engine_screen_open_menu();
 }
 
 int screen_manager_instrument_count(void)

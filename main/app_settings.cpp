@@ -31,10 +31,19 @@ struct Stored
     uint8_t wifi_debug;     /* was reserved, 0: older blobs read as off */
     float qnh_pa;
     uint8_t hidden_screens; /* added later: older blobs end before it */
+    uint8_t engine_type;    /* in what was padding: 0 in older blobs */
+    uint8_t reserved;       /* was a cylinder count: now the engine type's */
+    uint8_t engine_flags;
+    uint16_t engine_items;  /* added later: older blobs end before it */
 };
 
-/* A blob saved before hidden_screens: read as all shown. */
+/*
+ * Blobs saved before later fields were added: those read as 0, which
+ * for each is its default - all screens shown, the engine type's own
+ * items.
+ */
 static const size_t STORED_SIZE_V1 = offsetof(Stored, qnh_pa) + sizeof(float);
+static const size_t STORED_SIZE_V2 = offsetof(Stored, engine_items);
 
 static app_settings_t s_settings = {
     0,                              /* the horizon */
@@ -42,7 +51,10 @@ static app_settings_t s_settings = {
     BARO_SEA_LEVEL_STANDARD_PA,
     80,
     false,
-    0
+    0,
+    0,                              /* Rotax 912 */
+    0,                              /* its items */
+    0                               /* everything shown */
 };
 
 static lv_timer_t *s_save_timer = NULL;
@@ -62,6 +74,9 @@ static void save_now(lv_timer_t *timer)
     stored.wifi_debug = s_settings.wifi_debug ? 1 : 0;
     stored.qnh_pa = s_settings.qnh_pa;
     stored.hidden_screens = s_settings.hidden_screens;
+    stored.engine_type = s_settings.engine_type;
+    stored.engine_flags = s_settings.engine_flags;
+    stored.engine_items = s_settings.engine_items;
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
@@ -111,7 +126,8 @@ void app_settings_init(void)
     nvs_close(handle);
 
     if(err != ESP_OK ||
-       (length != sizeof(stored) && length != STORED_SIZE_V1) ||
+       (length != sizeof(stored) && length != STORED_SIZE_V1 &&
+        length != STORED_SIZE_V2) ||
        stored.version != STORED_VERSION)
     {
         ESP_LOGW(TAG, "saved settings unreadable, using defaults");
@@ -123,6 +139,9 @@ void app_settings_init(void)
                                                         : UNITS_METRIC;
     s_settings.wifi_debug = (stored.wifi_debug == 1);
     s_settings.hidden_screens = stored.hidden_screens;
+    s_settings.engine_type = stored.engine_type;
+    s_settings.engine_flags = stored.engine_flags;
+    s_settings.engine_items = stored.engine_items;
 
     if(stored.brightness >= BRIGHTNESS_MIN && stored.brightness <= 100)
         s_settings.brightness = stored.brightness;
@@ -201,5 +220,32 @@ void app_settings_set_hidden_screens(uint8_t mask)
         return;
 
     s_settings.hidden_screens = mask;
+    save_later();
+}
+
+void app_settings_set_engine_type(uint8_t type)
+{
+    if(type == s_settings.engine_type)
+        return;
+
+    s_settings.engine_type = type;
+    save_later();
+}
+
+void app_settings_set_engine_items(uint16_t items)
+{
+    if(items == s_settings.engine_items)
+        return;
+
+    s_settings.engine_items = items;
+    save_later();
+}
+
+void app_settings_set_engine_flags(uint8_t flags)
+{
+    if(flags == s_settings.engine_flags)
+        return;
+
+    s_settings.engine_flags = flags;
     save_later();
 }

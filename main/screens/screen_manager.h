@@ -7,7 +7,7 @@
  *
  * A double tap on any part of a screen that is not a control opens the
  * menu; a single tap outside it closes it again. A swipe left or right
- * steps through the instruments - not settings or diagnostics.
+ * steps through the instruments - not settings.
  * Instruments can be hidden in settings - the HSI with no GPS fitted,
  * say: they are then left out of both, though still there to be shown.
  *
@@ -29,8 +29,9 @@ typedef enum {
     SCREEN_TURN_COORDINATOR,
     SCREEN_COMPASS,
     SCREEN_HSI,
+    SCREEN_ENGINE,
+    SCREEN_CYLINDERS,
     SCREEN_SETTINGS,
-    SCREEN_DIAGNOSTICS,
     SCREEN_COUNT
 } screen_id_t;
 
@@ -55,5 +56,7 @@ bool screen_manager_visible(screen_id_t screen);
 bool screen_manager_set_visible(screen_id_t screen, bool visible);
 
 /* From any task: shown at the LVGL task's next look, within 100 ms. For
- * the Wi-Fi debug page, which runs in the web server's task. */
-void screen_manager_request(screen_id_t screen);
+ * the Wi-Fi debug page, which runs in the web server's task. With
+ * open_menu, the screen's own swipe-down menu opens too, if it has one -
+ * to see it in a screenshot. */
+void screen_manager_request(screen_id_t screen, bool open_menu = false);

@@ -172,9 +172,61 @@ void lvgl_port_take_stats(lvgl_port_stats_t *stats)
     portEXIT_CRITICAL(&s_stats_lock);
 }
 
+/* A touch put in from elsewhere - the debug page - in place of the
+ * panel's: pressed from start_us for duration_us, moving from (x1, y1)
+ * to (x2, y2). Guarded by s_inject_lock. */
+static portMUX_TYPE s_inject_lock = portMUX_INITIALIZER_UNLOCKED;
+static int64_t s_inject_start_us = 0;
+static int64_t s_inject_duration_us = 0;
+static lv_coord_t s_inject_x1, s_inject_y1, s_inject_x2, s_inject_y2;
+
+void lvgl_port_inject_touch(int x1, int y1, int x2, int y2,
+                            uint32_t duration_ms)
+{
+    portENTER_CRITICAL(&s_inject_lock);
+    s_inject_x1 = (lv_coord_t)x1;
+    s_inject_y1 = (lv_coord_t)y1;
+    s_inject_x2 = (lv_coord_t)x2;
+    s_inject_y2 = (lv_coord_t)y2;
+    s_inject_duration_us = (int64_t)duration_ms * 1000;
+    s_inject_start_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_inject_lock);
+}
+
+/* An injected touch now: true and where, while it lasts. */
+static bool injected_touch(lv_point_t *point)
+{
+    portENTER_CRITICAL(&s_inject_lock);
+
+    const int64_t elapsed = esp_timer_get_time() - s_inject_start_us;
+    const bool active = s_inject_duration_us > 0 &&
+                        elapsed < s_inject_duration_us;
+
+    if(active)
+    {
+        const float t = (float)elapsed / (float)s_inject_duration_us;
+
+        point->x = (lv_coord_t)(s_inject_x1 + (s_inject_x2 - s_inject_x1) * t);
+        point->y = (lv_coord_t)(s_inject_y1 + (s_inject_y2 - s_inject_y1) * t);
+    }
+    else
+    {
+        s_inject_duration_us = 0;
+    }
+
+    portEXIT_CRITICAL(&s_inject_lock);
+    return active;
+}
+
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
     (void)drv;
+
+    if(injected_touch(&data->point))
+    {
+        data->state = LV_INDEV_STATE_PR;
+        return;
+    }
 
     touch_state_t touch;
 

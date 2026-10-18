@@ -4,8 +4,8 @@
  * Machine readable sensor stream on the serial console, for plotting on
  * a PC (tools/sensor_plot.py).
  *
- * Runs while a screen that wants it is showing - diagnostics or the
- * compass - at 20 lines a second, mixed in with the normal log. Lines
+ * Runs while a screen that wants it is showing - the compass screen,
+ * or the compass page of settings - at 20 lines a second, mixed in with the normal log. Lines
  * look like NMEA sentences so they are easy to pick out and check:
  *
  *   $DIAGH,<version>,<name>,<name>,...*CS     diagnostics: column names

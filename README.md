@@ -119,7 +119,7 @@ main/screens/         one file pair per screen, the menu that switches them
                       (screen_manager), and the update screen
 main/widgets/         pieces drawn on a screen: the altitude panel
 tools/                PC side: live sensor plot from the serial stream, GPS
-                      emulator for the CAN bus
+                      and engine monitoring unit emulators for the CAN bus
 test/                 host build of components/ahrs plus its tests
 ```
 
@@ -151,12 +151,14 @@ other.
 | What is saved, defaults, save delay | `main/app_settings.cpp` |
 | Compass card appearance | `main/screens/compass_screen.cpp` |
 | HSI appearance, deviation full scale | `main/screens/hsi_screen.cpp` |
+| Engine types and their limits | `main/engine_limits.cpp` |
+| Engine and cylinders screens | `main/screens/engine_screen.cpp` |
 | GPX reading, cross track, waypoint sequencing | `components/ahrs/route.cpp` |
 | Turn coordinator appearance, symbol scale | `main/screens/turn_coordinator_screen.cpp` |
 | Turn rate and ball damping | `TurnCoordinatorConfig`, `components/ahrs/include/turn_coordinator.h` |
 | Magnetometer calibration UI | `main/screens/settings_screen.cpp` |
 | Calibration acceptance (coverage, tilt, fit), magnetic dip | `MagCalibratorConfig`, `components/ahrs/include/mag_calibration.h`; dip also `CONFIG_MAG_DIP_DEG` |
-| Diagnostics screen layout | `main/screens/diagnostics_screen.cpp` |
+| Settings pages, the custom engine's editor | `main/screens/settings_screen.cpp` |
 | Wi-Fi network, access point password | `make menuconfig`, "Wi-Fi debug", or the web page |
 | Wi-Fi debug web page, update checks | `main/wifi_debug.cpp` |
 | What the display shows during an update | `main/screens/update_screen.cpp` |
@@ -253,12 +255,14 @@ snapshot (`tilt_sigma_deg`, `heading_sigma_deg`, `altitude_sigma_m`,
 
 Double tap the background of any screen to open the menu, which
 switches between the artificial horizon, the altimeter, the turn
-coordinator, the compass, the HSI, settings and diagnostics; a tap
+coordinator, the compass, the HSI, the engine, the cylinders and
+settings; a tap
 outside the menu closes it.
-A swipe left or right steps through the five instruments - horizon,
-altimeter, turn coordinator, compass, HSI, and round again - but not
-settings or diagnostics; a swipe that starts on a control does not
-also press it. An instrument switched off under SCREENS in settings -
+A swipe left or right steps through the seven instruments - horizon,
+altimeter, turn coordinator, compass, HSI, engine, cylinders, and round
+again - but not
+settings; a swipe that starts on a control does not
+also press it. An instrument switched off under Screens in settings -
 the HSI with no GPS fitted, say - is left out of both the swipes and
 the menu; one always stays on. LVGL 8 has no double
 click event, so `main/screens/screen_manager.cpp` builds one from two short clicks within
@@ -332,10 +336,55 @@ crashed while building the menu. The start-up log prints the figure.
   host tests. `tools/gps_emulator.py --gpx FILE` flies a file's route
   for testing, `--offset` to one side of it and `--above` over its
   path.
-* **Settings** - units (m and m/s, or ft and ft/min), backlight,
-  which instruments are shown, mounting alignment, Wi-Fi debug, and the magnetometer's calibration.
+* **Engine** - engine 1 from the CAN bus engine unit
+  (`docs/CAN_PROTOCOL.md`). The RPM dial over the top, with the manifold
+  pressure under its number; below it a bar each for oil pressure and
+  temperature, the hottest CHT, the coolant (Rotax) or the hottest EGT
+  (Lycoming), fuel pressure, flow and quantity (both tanks), and the bus
+  voltage. Each bar shows its green, amber and red ranges with a mark at
+  the value; a number is white in the green, amber or red outside it.
+* **Cylinders** - EGT (blue) and CHT (coloured by its ranges) of each
+  cylinder side by side, with the CHT red line across, and the numbers
+  under them, the hottest cylinder's lit; above, the carburettor air and
+  the battery current; below, endurance, fuel used and engine time.
 
-  **Set level**, under MOUNTING, is for a unit not square in the panel:
+  Both screens colour by the engine picked under Engine in settings -
+  Rotax 912, Lycoming O-320, IO-540, or a custom one - with the usual limits for the
+  type (`main/engine_limits.cpp`): check them against the engine's
+  manual. Values are metric: bar, deg C, L, L/h. A value whose message
+  has stopped shows as dashes, and with nothing from the engine unit the
+  screens say NO ENGINE DATA. `tools/emu_emulator.py` emulates the
+  engine unit for testing.
+
+  A swipe down from the top of either opens what they show: EGT and CHT
+  bars on the cylinders screen (one of them always stays), MAP under the RPM,
+  and which values get the engine screen's eight bars - oil pressure
+  and temperature, hottest CHT and EGT, coolant, fuel pressure, flow and
+  quantity, volts, battery amps and carburettor air. A ninth is refused;
+  picking another engine type in settings goes back to its own.
+* **Settings** - a list of pages, each with a Back button; leaving the
+  screen goes back to the list:
+  * **Display** - units (m and m/s, or ft and ft/min) and backlight.
+  * **Screens** - which instruments are shown.
+  * **Engine** - the engine type: Rotax 912, Lycoming O-320, IO-540 or
+    Custom. With Custom, **Edit custom engine** opens a page per value -
+    RPM, manifold, oil pressure and temperature, CHT, coolant, EGT, fuel
+    pressure, flow and quantity, volts, battery amps, carburettor air -
+    each with its scale (from, to) and where red and amber begin below
+    and above, set with - and +; tapping a limit switches it off or on.
+    Another page has its cylinders and whether it is liquid cooled. The
+    custom engine can be started from any of the types, and is kept in
+    NVS (`main/engine_limits.cpp`); the RPM dial's ticks follow its top
+    RPM.
+  * **Mounting** - Set level.
+  * **Wi-Fi** - Wi-Fi debug.
+  * **Compass** - the magnetometer's live reading and its calibration.
+    While this page is open the raw `$DIAG` stream runs too.
+
+  Only the page showing is built, and deleted when left: LVGL's 64 KB
+  heap is shared by every screen, built up front.
+
+  **Set level**, under Mounting, is for a unit not square in the panel:
   with the aircraft level and still it averages gravity for two seconds,
   and the rotation that takes it straight down is applied to every
   sensor from then on (`main/alignment.cpp`, applied in `main/mounting.h`;
@@ -352,9 +401,6 @@ last change rather than on every one - holding the QNH button would
 otherwise write flash a dozen times a second. The magnetometer and the
 mounting alignment keep their own records (`main/magnetometer.cpp`,
 `main/alignment.cpp`).
-* **Diagnostics** - the raw readings: accelerometer and gyro in sensor
-  axes, the magnetometer in uT and counts, the four ADC channels in
-  counts and volts, the barometer, and read error counts.
 
 ## Magnetometer and ADC (optional)
 
@@ -385,7 +431,7 @@ choosing between each and its exact opposite by the field pointing
 down. Run it again if the board changes:
 
 ```sh
-python3 tools/check_mag_axes.py --url http://192.168.0.124   # Diagnostics screen open
+python3 tools/check_mag_axes.py --url http://192.168.0.124   # Settings > Compass open
 python3 tools/check_mag_axes.py --self-test
 ```
 
@@ -468,8 +514,9 @@ The page has:
 
 Two more addresses, for looking at the screens without the unit in
 front of you: `/screenshot.bmp` is the picture on the panel now, and
-`/screen?id=N` switches to screen N (0 horizon, 1 altimeter, 2 turn
-coordinator, 3 compass, 4 HSI, 5 settings, 6 diagnostics):
+`/screen?id=N` switches to screen N (`&menu=1` opens its swipe-down
+menu too, on the HSI and engine screens) (0 horizon, 1 altimeter, 2 turn
+coordinator, 3 compass, 4 HSI, 5 engine, 6 cylinders, 7 settings):
 
 ```sh
 curl "http://192.168.0.124/screen?id=3"
@@ -484,9 +531,9 @@ the unit is at 192.168.0.124.
 | Endpoint | Method | Returns / does |
 | --- | --- | --- |
 | `/` | GET | The debug page: charts, compass, CAN bus, route, log, update, device |
-| `/status` | GET | JSON: firmware `version`, `built` date and time, running `partition`, `uptime_s`, free `heap_internal` and `heap_psram` in bytes, `network` (SSID and address, or the access point), `rssi` in dBm, and `reset`: the last reset reason and crash |
+| `/status` | GET | JSON: firmware `version`, `built` date and time, running `partition`, `uptime_s`, free `heap_internal` and `heap_psram` in bytes, `network` (SSID and address, or the access point), `rssi` in dBm, `reset`: the last reset reason and crash, and `fb_guard_hits`: writes found beside the framebuffers (should stay 0) |
 | `/log?from=N` | GET | Text: the log from ring position N on, up to 4 KB per request. The `X-Log-Next` header is the position to ask for next. `from=0` starts with the oldest line kept, and `from=end` returns only the current position |
-| `/stream?from=N` | GET | Text, paged like `/log`: the `$DIAG`/`$COMP` sentences, written only while the Diagnostics or Compass screen is showing. Used by `tools/sensor_plot.py --url` |
+| `/stream?from=N` | GET | Text, paged like `/log`: the `$DIAG`/`$COMP` sentences, written only while the Compass screen or the Compass page of settings is showing. Used by `tools/sensor_plot.py --url` |
 | `/telemetry?from=N` | GET | Text, paged like `/log`: the `$TEL` (20 Hz) and `$SYS` (1 Hz) CSV sentences, each kind after its `$TELH`/`$SYSH` header of column names. Always written; the page's charts read it |
 | `/compass` | GET | JSON: magnetometer `present`; whether a swing is `calibrating`; the `saved` calibration (offset, scale, field); the READY `limits`. During a swing it also has `progress`, the fitted ellipse `fit` and every kept `points` pair |
 | `/can` | GET | JSON: the CAN bus `bus` (state, bit rate, pins, frame counts and rate, unknown IDs, bad lengths, bus errors, frames lost, bus-off count, TX and RX error counters, `rx_level`: the RX pin now, 1 when the bus is idle). Then every protocol message under `msgs`: `id`, `name`, `from`, `period_ms`, `count`, `age_ms` (null if never received), `fresh` (within its timeout) and its decoded values `v` (null = not available). Last, the `nodes` heard by heartbeat. See `docs/CAN_PROTOCOL.md` |
@@ -495,7 +542,8 @@ the unit is at 192.168.0.124.
 | `/route` | POST | The body is a GPX file, up to 512 KB: replaces the route, saves it, and goes direct to its first waypoint. The response says how many waypoints, or why the file was refused |
 | `/route` | DELETE | Clears the route |
 | `/route/direct?wpt=N` | POST | Straight from where the aircraft is now to waypoint N, from 0 |
-| `/screen?id=N` | GET | Switches to screen N: 0 horizon, 1 altimeter, 2 turn coordinator, 3 compass, 4 HSI, 5 settings, 6 diagnostics |
+| `/screen?id=N` | GET | Switches to screen N: 0 horizon, 1 altimeter, 2 turn coordinator, 3 compass, 4 HSI, 5 engine, 6 cylinders, 7 settings. `&menu=1` also opens its swipe-down menu (HSI, engine, cylinders) |
+| `/touch?x=X&y=Y[&x2=X&y2=Y][&ms=N]` | GET | A touch as if on the panel, for testing the screens remotely: a tap at (x, y), or with x2, y2 a swipe to there; `ms` is how long the finger is down (default 100; about 300 for a swipe). With `/screenshot.bmp` it drives and checks the menus without anyone at the unit |
 | `/coredump` | GET | The core dump of the last crash as `coredump.elf`, or 404 if none is stored. For `idf.py coredump-info --core coredump.elf` |
 | `/update` | POST | Installs the request body, `build/miniefis.bin`, into the other OTA slot and restarts into it. The response is the result as text. A file that isn't this project's ESP32-S3 application is refused before anything is erased |
 | `/restart` | POST | Restarts the unit |
@@ -612,10 +660,10 @@ accelerometer - fix it in `sensor_to_body()` in `main/mounting.h`.
 
 ## Plotting sensor data on a PC
 
-Two screens stream their data on the serial console, 20 times a second,
+Two views stream their data on the serial console, 20 times a second,
 mixed in with the normal log - the format is in `main/diag_stream.h`:
 
-* **Diagnostics** sends `$DIAG` lines: every sensor, raw.
+* **The Compass page of settings** sends `$DIAG` lines: every sensor, raw.
 * **Compass** sends `$COMP` lines: everything the heading is made of,
   in the order it is computed - the raw field, the axis mapping, the
   calibration, the corrected field in body axes, the roll and pitch used
@@ -657,7 +705,7 @@ python3 tools/sensor_plot.py --url http://192.168.4.1       # over Wi-Fi
 the serial port; the address is on the unit's settings screen. It polls
 five times a second and starts from the newest, so it lags by up to
 about 200 ms, and like the serial stream it only has data while the
-Diagnostics or Compass screen is showing.
+Compass screen or the Compass page of settings is showing.
 
 The script opens the port without resetting the device. If matplotlib
 fails to import with a NumPy 1.x/2.x error, the system matplotlib and a
@@ -665,8 +713,8 @@ pip installed NumPy disagree; run it from a virtual environment.
 
 ## Unexpected restarts
 
-The start-up log, and the bottom of the diagnostics screen, say why the
-unit last reset. A crash also writes a core dump to the `coredump`
+The start-up log, and `reset` in `/status`, say why the unit last
+reset. A crash also writes a core dump to the `coredump`
 partition, and the next start-up prints the crashed task and its
 backtrace from it - so a restart that happened away from the PC can
 still be traced. Decode the backtrace against the ELF that was running:
@@ -696,8 +744,8 @@ The earlier defences stay: `CONFIG_I2C_ISR_IRAM_SAFE` keeps the I2C
 driver's records in internal RAM; and the gaps beside the framebuffers are filled with
 guard blocks (`display_st7701.cpp`) that the diagnostics task checks
 four times a second. A hit is logged as "something wrote past a
-framebuffer", with the value and address, and counted as "fb guard" on
-the diagnostics screen - it should stay at 0, and if it ever does not,
+framebuffer", with the value and address, and counted in `fb_guard_hits`
+in `/status` - it should stay at 0, and if it ever does not,
 that is the lead to follow.
 
 Every ten seconds the serial log also reports the least free stack each

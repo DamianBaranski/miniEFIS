@@ -19,7 +19,7 @@ told apart by the dip: north of the equator the field points down, so
 its component along gravity - which the accelerometer gives - is
 positive.
 
-On the unit: open the Diagnostics screen (it streams $DIAG). Then
+On the unit: open Settings > Compass (it streams $DIAG). Then
 
     python3 tools/check_mag_axes.py --url http://192.168.0.124
 
@@ -179,7 +179,7 @@ def record(url, seconds):
 
     rows = stream.snapshot("DIAG")
     if len(rows) < 100:
-        sys.exit("too few $DIAG samples - is the Diagnostics screen open?")
+        sys.exit("too few $DIAG samples - is Settings > Compass open?")
 
     # Gyro bias: the still start.
     t_first = rows[0]["t_ms"]

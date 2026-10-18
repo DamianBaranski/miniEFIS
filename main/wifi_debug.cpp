@@ -10,6 +10,7 @@
 
 #include "board_pins.h"
 #include "lvgl_port.h"
+#include "diagnostics.h"
 
 #include "esp_app_desc.h"
 #include "esp_core_dump.h"
@@ -693,13 +694,15 @@ static esp_err_t handle_status(httpd_req_t *req)
     snprintf(json, sizeof(json),
              "{\"version\":\"%s\",\"built\":\"%s %s\",\"partition\":\"%s\","
              "\"uptime_s\":%lld,\"heap_internal\":%u,\"heap_psram\":%u,"
-             "\"network\":\"%s\",\"rssi\":%d,\"reset\":\"%s\"}",
+             "\"network\":\"%s\",\"rssi\":%d,\"reset\":\"%s\","
+             "\"fb_guard_hits\":%lu}",
              app->version, app->date, app->time,
              esp_ota_get_running_partition()->label,
              (long long)(esp_timer_get_time() / 1000000),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-             escaped_network, rssi, reset);
+             escaped_network, rssi, reset,
+             (unsigned long)diagnostics_guard_hits());
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, json);
@@ -857,7 +860,8 @@ static esp_err_t handle_screenshot(httpd_req_t *req)
     return err;
 }
 
-/* GET /screen?id=N: show screen N (screen_manager.h's order). */
+/* GET /screen?id=N[&menu=1]: show screen N (screen_manager.h's order),
+ * and with menu=1 its swipe-down menu. */
 static esp_err_t handle_screen(httpd_req_t *req)
 {
     char query[32];
@@ -874,7 +878,52 @@ static esp_err_t handle_screen(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
                                    "no such screen");
 
-    screen_manager_request((screen_id_t)id);
+    char menu[4];
+    const bool open_menu =
+        httpd_query_key_value(query, "menu", menu, sizeof(menu)) == ESP_OK &&
+        atoi(menu) == 1;
+
+    screen_manager_request((screen_id_t)id, open_menu);
+
+    return httpd_resp_sendstr(req, "ok");
+}
+
+/*
+ * GET /touch?x=X&y=Y[&x2=X&y2=Y][&ms=N]: a touch as if on the panel,
+ * for testing the screens from here - a tap at (x, y), or with x2, y2 a
+ * swipe to there. ms is how long the finger is down: 100 by default, a
+ * tap; 300 suits a swipe.
+ */
+static esp_err_t handle_touch(httpd_req_t *req)
+{
+    char query[64];
+    char value[8];
+
+    if(httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "touch?x=X&y=Y[&x2=X&y2=Y][&ms=N]");
+
+    int numbers[5] = { -1, -1, -1, -1, 100 };
+    static const char *const KEYS[5] = { "x", "y", "x2", "y2", "ms" };
+
+    for(int i = 0; i < 5; i++)
+        if(httpd_query_key_value(query, KEYS[i], value, sizeof(value)) == ESP_OK)
+            numbers[i] = atoi(value);
+
+    if(numbers[0] < 0 || numbers[1] < 0 || numbers[4] <= 0 ||
+       numbers[4] > 5000)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "touch?x=X&y=Y[&x2=X&y2=Y][&ms=N]");
+
+    /* No end: a tap, where it began. */
+    if(numbers[2] < 0 || numbers[3] < 0)
+    {
+        numbers[2] = numbers[0];
+        numbers[3] = numbers[1];
+    }
+
+    lvgl_port_inject_touch(numbers[0], numbers[1], numbers[2], numbers[3],
+                           (uint32_t)numbers[4]);
 
     return httpd_resp_sendstr(req, "ok");
 }
@@ -1818,6 +1867,7 @@ static void start_server(void)
         { "/route/direct", HTTP_POST, handle_route_direct, NULL },
         { "/screenshot.bmp", HTTP_GET, handle_screenshot, NULL },
         { "/screen",   HTTP_GET,  handle_screen,   NULL },
+        { "/touch",    HTTP_GET,  handle_touch,    NULL },
         { "/coredump", HTTP_GET,  handle_coredump, NULL },
         { "/update",   HTTP_POST, handle_update,   NULL },
         { "/restart",  HTTP_POST, handle_restart,  NULL },

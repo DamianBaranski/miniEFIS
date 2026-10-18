@@ -443,8 +443,10 @@ static void menu_close(void)
     lv_obj_add_flag(s_menu, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_menu_backdrop, LV_OBJ_FLAG_HIDDEN);
 
-    /* The rows go: they are made again, as the route is then. */
-    lv_obj_clean(s_menu_list);
+    /* The rows go: they are made again, as the route is then. Async:
+     * this is often a row's own button's click. */
+    for(uint32_t i = 0; i < lv_obj_get_child_cnt(s_menu_list); i++)
+        lv_obj_del_async(lv_obj_get_child(s_menu_list, (int32_t)i));
 }
 
 static void on_direct(lv_event_t *e)
@@ -503,7 +505,7 @@ void hsi_screen_open_menu(void)
     route_store_status(&status);
     route_store_get(route);
 
-    lv_obj_clean(s_menu_list);
+    /* The list is empty: the rows went when it last closed. */
 
     lv_obj_t *active_row = NULL;
 

@@ -1,5 +1,6 @@
 #include "alignment.h"
 #include "app_settings.h"
+#include "engine_limits.h"
 #include "can_bus.h"
 #include "altitude_widget.h"
 #include "horizon_screen.h"
@@ -163,6 +164,7 @@ extern "C" void app_main(void)
     crash_report_init();
     settings_storage_init();
     app_settings_init();
+    engine_limits_init();
     magnetometer_init();
     alignment_init();
 

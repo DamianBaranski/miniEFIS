@@ -11,6 +11,7 @@ idf_component_register(
         "magnetometer.cpp"
         "navigation.cpp"
         "route_store.cpp"
+        "engine_limits.cpp"
         "sensor_readings.cpp"
         "web_log.cpp"
         "wifi_debug.cpp"
@@ -21,8 +22,8 @@ idf_component_register(
         "screens/turn_coordinator_screen.cpp"
         "screens/compass_screen.cpp"
         "screens/hsi_screen.cpp"
+        "screens/engine_screen.cpp"
         "screens/settings_screen.cpp"
-        "screens/diagnostics_screen.cpp"
         "screens/update_screen.cpp"
 
         "widgets/altitude_widget.cpp"
