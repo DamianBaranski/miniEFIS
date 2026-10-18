@@ -23,7 +23,7 @@ use the data yet, and the CAN BUS setting is not there yet.
 | Topology | One linear bus, stubs under 0.3 m, 120 ohm termination at both physical ends only |
 | Cable | Twisted pair for CANH/CANL plus +12 V and GND, shielded and grounded at one end |
 | Connector | DB9 per CiA 303-1: pin 2 CANL, pin 7 CANH, pin 3 GND, pin 9 +12 V |
-| Transceiver | 3.3 V part on every node, e.g. SN65HVD230 or TCAN330 |
+| Transceiver | 3.3 V part on every node, e.g. SN65HVD230 or TCAN330. Not a 5 V part such as the TJA1050 run from 3.3 V: it still receives, but it can't drive its acknowledge onto the bus. The EFIS then reads back its own ACK as recessive, counts a bit error and drops every frame |
 
 At 500 kbit/s an 8-byte frame, worst-case bit stuffing included, takes
 about 270 us. The message set below comes to roughly 80 frames/s,

@@ -143,7 +143,8 @@ typedef struct {
     uint32_t bus_off_count;
     uint32_t tx_error_counter;
     uint32_t rx_error_counter;
-    uint32_t frames_per_s;      /* over the last full second */
+    uint32_t frames_per_s;      /* measured over the last 250 ms */
+    int rx_level;               /* the RX pin now: 1 recessive (idle) */
 } can_bus_stats_t;
 
 typedef struct {
@@ -171,6 +172,7 @@ void can_bus_start(void);
 
 /* A consistent copy of everything. Safe from any task. */
 void can_bus_get(can_data_t *out);
+
 
 /*
  * Whether a message is current at now_us: it arrived within 3 periods,

@@ -20,6 +20,7 @@ then shows each message arriving and its values.
 
     pip install python-can
     python3 tools/gps_emulator.py                         # socketcan can0
+    python3 tools/gps_emulator.py -i seeedstudio -c /dev/ttyUSB0
     python3 tools/gps_emulator.py -i slcan -c /dev/ttyACM0
     python3 tools/gps_emulator.py -i gs_usb -c 0
     python3 tools/gps_emulator.py -i pcan -c PCAN_USBBUS1
@@ -31,6 +32,22 @@ Adapters:
              on Linux appear as a network interface. Bring it up first,
              at the bus's bit rate:
                  sudo ip link set can0 up type can bitrate 500000
+  seeedstudio  The "USB-CAN Analyzer" sold under many names: a CH340 USB
+             serial chip (1a86:7523, /dev/ttyUSB0) in front of the CAN
+             controller, spoken to at 2 Mbaud. It doesn't report back
+             whether a frame got onto the bus, so sends never fail here
+             even with nothing connected: check the EFIS's debug page.
+             Run one instance per adapter: two writing to the same
+             serial port interleave their bytes, and the adapter then
+             sends frames with one message's ID on another's data, or
+             loses its set-up altogether.
+             It also misses the set-up python-can sends the moment the
+             port opens, and keeps the bit rate it had before (800
+             kbit/s seen): the EFIS then counts one bus error per frame
+             and receives nothing. The script sends the set-up again
+             after a pause. And frames written to it back to back come
+             out with one's ID on another's data, so it waits 2 ms
+             after each.
   slcan      CANable and other Lawicel-protocol adapters, a serial port.
   gs_usb     candleLight without the kernel driver (needs pyusb).
   pcan       PEAK, through PEAK's own library.
@@ -57,6 +74,13 @@ except ImportError:
 NODE = 2
 DEVICE_TYPE_GPS = 2
 FIRMWARE = (1 << 8) | 0             # 1.0
+
+# The pause either side of the USB-CAN Analyzer's second set-up frame.
+SEEED_SETTLE_S = 0.5
+
+# The pause after each frame to the USB-CAN Analyzer: written back to
+# back, it puts one frame's ID on another's data.
+SEEED_GAP_S = 0.002
 
 ID_POSITION = 0x200
 ID_VELOCITY = 0x201
@@ -132,8 +156,9 @@ class Flight:
 class Sender:
     """Sends frames, counting and reporting the ones the bus refused."""
 
-    def __init__(self, bus):
+    def __init__(self, bus, gap_s):
         self.bus = bus
+        self.gap_s = gap_s
         self.sent = 0
         self.failed = 0
         self.last_error = None
@@ -145,6 +170,8 @@ class Sender:
         try:
             self.bus.send(message, timeout=0.05)
             self.sent += 1
+            if self.gap_s > 0:
+                time.sleep(self.gap_s)
         except can.CanError as error:
             self.failed += 1
             self.last_error = str(error)
@@ -261,8 +288,14 @@ def main():
         sys.exit("could not open %s %s: %s"
                  % (args.interface, args.channel, error))
 
+    if args.interface == "seeedstudio":
+        time.sleep(SEEED_SETTLE_S)
+        bus.init_frame()
+        time.sleep(SEEED_SETTLE_S)
+
     flight = Flight(args)
-    sender = Sender(bus)
+    sender = Sender(bus, SEEED_GAP_S if args.interface == "seeedstudio"
+                    else 0.0)
     fix_type = FIX_TYPES[args.fix]
     have_fix = fix_type >= 2
     have_altitude = fix_type >= 3

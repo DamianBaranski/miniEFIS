@@ -1009,14 +1009,15 @@ static esp_err_t handle_can(httpd_req_t *req)
     add("{\"bus\":{\"state\":\"%s\",\"bitrate\":%d,\"tx_pin\":%d,"
         "\"rx_pin\":%d,\"frames\":%lu,\"frames_per_s\":%lu,"
         "\"unknown\":%lu,\"bad_length\":%lu,\"bus_errors\":%lu,"
-        "\"rx_lost\":%lu,\"bus_off\":%lu,\"tec\":%lu,\"rec\":%lu},",
+        "\"rx_lost\":%lu,\"bus_off\":%lu,\"tec\":%lu,\"rec\":%lu,"
+        "\"rx_level\":%d},",
         can_state_name(bus.state), BOARD_CAN_BITRATE, BOARD_CAN_TX_PIN,
         BOARD_CAN_RX_PIN, (unsigned long)bus.frames,
         (unsigned long)bus.frames_per_s, (unsigned long)bus.unknown_frames,
         (unsigned long)bus.bad_length, (unsigned long)bus.bus_errors,
         (unsigned long)bus.rx_lost, (unsigned long)bus.bus_off_count,
         (unsigned long)bus.tx_error_counter,
-        (unsigned long)bus.rx_error_counter);
+        (unsigned long)bus.rx_error_counter, bus.rx_level);
 
     add("\"msgs\":[");
 

@@ -30,6 +30,9 @@ static const TickType_t RECEIVE_TIMEOUT = pdMS_TO_TICKS(50);
  * or the wrong bit rate, makes them continuously. */
 static const int64_t ERROR_LOG_INTERVAL_US = 10 * 1000 * 1000;
 
+/* How often the driver's counters and the frame rate are taken. */
+static const int64_t STATISTICS_PERIOD_US = 250 * 1000;
+
 /* The protocol's identifiers (docs/CAN_PROTOCOL.md). */
 enum {
     ID_DIFF_PRESSURE    = 0x100,
@@ -334,22 +337,18 @@ static void handle_alerts(int64_t now_us)
     if(twai_read_alerts(&alerts, 0) != ESP_OK || alerts == 0)
         return;
 
-    portENTER_CRITICAL(&s_lock);
-
-    if(alerts & TWAI_ALERT_BUS_ERROR)
-        s_data.bus.bus_errors++;
-    if(alerts & (TWAI_ALERT_RX_QUEUE_FULL | TWAI_ALERT_RX_FIFO_OVERRUN))
-        s_data.bus.rx_lost++;
-    if(alerts & TWAI_ALERT_BUS_OFF)
-        s_data.bus.bus_off_count++;
-
-    portEXIT_CRITICAL(&s_lock);
-
+    /* Error and lost-frame counts come from the driver's own counters
+     * (update_statistics): an alert bit stands for any number of them
+     * since the last look. */
     if(alerts & TWAI_ALERT_BUS_OFF)
     {
-        /* Can't happen from transmitting - nothing is - but receive
-         * errors raise the error count too, and a bus with no
-         * transceiver or the wrong bit rate gets here. */
+        portENTER_CRITICAL(&s_lock);
+        s_data.bus.bus_off_count++;
+        portEXIT_CRITICAL(&s_lock);
+
+        /* No data frame is ever sent, but the controller still drives
+         * the ACK bit and error flags, and a fault in those counts:
+         * a broken or wrongly powered transceiver gets here. */
         set_state(CAN_BUS_BUS_OFF);
         ESP_LOGW(TAG, "bus off - recovering");
         twai_initiate_recovery();
@@ -377,44 +376,52 @@ static void handle_alerts(int64_t now_us)
     {
         s_last_error_log_us = now_us;
 
-        can_bus_stats_t stats;
-        portENTER_CRITICAL(&s_lock);
-        stats = s_data.bus;
-        portEXIT_CRITICAL(&s_lock);
+        twai_status_info_t info;
 
-        ESP_LOGW(TAG, "bus errors %lu, frames lost %lu (no transceiver, "
-                 "termination, or bit rate?)",
-                 (unsigned long)stats.bus_errors,
-                 (unsigned long)stats.rx_lost);
+        if(twai_get_status_info(&info) == ESP_OK)
+            ESP_LOGW(TAG, "bus errors %lu, frames lost %lu, RX error "
+                     "counter %lu (wiring, termination, ground or bit "
+                     "rate?)",
+                     (unsigned long)info.bus_error_count,
+                     (unsigned long)(info.rx_missed_count +
+                                     info.rx_overrun_count),
+                     (unsigned long)info.rx_error_counter);
     }
 }
 
-/* Once a second: the controller's error counters and the frame rate. */
+/* Four times a second: the controller's counters and the frame rate. */
 static void update_statistics(int64_t now_us)
 {
-    static int64_t s_second_start_us = 0;
+    static int64_t s_period_start_us = 0;
     static uint32_t s_frames_at_start = 0;
 
-    if(now_us - s_second_start_us < 1000000)
+    if(now_us - s_period_start_us < STATISTICS_PERIOD_US)
         return;
 
     twai_status_info_t info;
     const bool have_info = (twai_get_status_info(&info) == ESP_OK);
+    const int rx_level = gpio_get_level((gpio_num_t)BOARD_CAN_RX_PIN);
 
     portENTER_CRITICAL(&s_lock);
 
-    s_data.bus.frames_per_s = s_data.bus.frames - s_frames_at_start;
+    s_data.bus.frames_per_s = (uint32_t)(
+        (uint64_t)(s_data.bus.frames - s_frames_at_start) * 1000000 /
+        (uint64_t)(now_us - s_period_start_us));
     s_frames_at_start = s_data.bus.frames;
 
     if(have_info)
     {
         s_data.bus.tx_error_counter = info.tx_error_counter;
         s_data.bus.rx_error_counter = info.rx_error_counter;
+        s_data.bus.bus_errors = info.bus_error_count;
+        s_data.bus.rx_lost = info.rx_missed_count + info.rx_overrun_count;
     }
+
+    s_data.bus.rx_level = rx_level;
 
     portEXIT_CRITICAL(&s_lock);
 
-    s_second_start_us = now_us;
+    s_period_start_us = now_us;
 }
 
 static void can_task(void *argument)

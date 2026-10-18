@@ -430,6 +430,38 @@ curl "http://192.168.0.124/screen?id=3"
 curl -o compass.bmp http://192.168.0.124/screenshot.bmp
 ```
 
+### Endpoints
+
+All are served by `main/wifi_debug.cpp`, with no login. In the examples
+the unit is at 192.168.0.124.
+
+| Endpoint | Method | Returns / does |
+| --- | --- | --- |
+| `/` | GET | The debug page: charts, compass, CAN bus, log, update, device |
+| `/status` | GET | JSON: firmware `version`, `built` date and time, running `partition`, `uptime_s`, free `heap_internal` and `heap_psram` in bytes, `network` (SSID and address, or the access point), `rssi` in dBm, and `reset`: the last reset reason and crash |
+| `/log?from=N` | GET | Text: the log from ring position N on, up to 4 KB per request. The `X-Log-Next` header is the position to ask for next. `from=0` starts with the oldest line kept, and `from=end` returns only the current position |
+| `/stream?from=N` | GET | Text, paged like `/log`: the `$DIAG`/`$COMP` sentences, written only while the Diagnostics or Compass screen is showing. Used by `tools/sensor_plot.py --url` |
+| `/telemetry?from=N` | GET | Text, paged like `/log`: the `$TEL` (20 Hz) and `$SYS` (1 Hz) CSV sentences, each kind after its `$TELH`/`$SYSH` header of column names. Always written; the page's charts read it |
+| `/compass` | GET | JSON: magnetometer `present`; whether a swing is `calibrating`; the `saved` calibration (offset, scale, field); the READY `limits`. During a swing it also has `progress`, the fitted ellipse `fit` and every kept `points` pair |
+| `/can` | GET | JSON: the CAN bus `bus` (state, bit rate, pins, frame counts and rate, unknown IDs, bad lengths, bus errors, frames lost, bus-off count, TX and RX error counters, `rx_level`: the RX pin now, 1 when the bus is idle). Then every protocol message under `msgs`: `id`, `name`, `from`, `period_ms`, `count`, `age_ms` (null if never received), `fresh` (within its timeout) and its decoded values `v` (null = not available). Last, the `nodes` heard by heartbeat. See `docs/CAN_PROTOCOL.md` |
+| `/screenshot.bmp` | GET | The picture on the panel now, a 480x480 16-bit BMP |
+| `/screen?id=N` | GET | Switches to screen N: 0 horizon, 1 altimeter, 2 turn coordinator, 3 compass, 4 settings, 5 diagnostics |
+| `/coredump` | GET | The core dump of the last crash as `coredump.elf`, or 404 if none is stored. For `idf.py coredump-info --core coredump.elf` |
+| `/update` | POST | Installs the request body, `build/miniefis.bin`, into the other OTA slot and restarts into it. The response is the result as text. A file that isn't this project's ESP32-S3 application is refused before anything is erased |
+| `/restart` | POST | Restarts the unit |
+| `/wifi` | POST | Form fields `ssid` and `password`: saves the network to join and joins it now |
+
+```sh
+curl http://192.168.0.124/status
+curl -i "http://192.168.0.124/log?from=0"          # X-Log-Next: where to continue
+curl http://192.168.0.124/can | python3 -m json.tool
+curl -X POST --data-binary @build/miniefis.bin \
+     -H "Content-Type: application/octet-stream" http://192.168.0.124/update
+curl -X POST http://192.168.0.124/restart
+curl -o coredump.elf http://192.168.0.124/coredump
+curl -d "ssid=MyNetwork&password=secret" http://192.168.0.124/wifi
+```
+
 A new image boots on trial (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`). It
 confirms itself once `app_main` has finished - and, if Wi-Fi debug is
 on, once its web server is up again. One that crashes or hangs before
