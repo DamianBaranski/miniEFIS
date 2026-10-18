@@ -54,9 +54,14 @@ static bool menu_is_open(void)
 
 static void menu_open(void)
 {
-    /* Show where we are. */
+    /* Show where we are, and only the screens shown. */
     for(int i = 0; i < SCREEN_COUNT; i++)
     {
+        if(screen_manager_visible((screen_id_t)i) || i == s_current)
+            lv_obj_clear_flag(s_menu_buttons[i], LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(s_menu_buttons[i], LV_OBJ_FLAG_HIDDEN);
+
         lv_obj_set_style_bg_color(
             s_menu_buttons[i],
             lv_color_hex(i == s_current ? BUTTON_CURRENT_COLOUR
@@ -122,6 +127,21 @@ static const screen_id_t SWIPE_ORDER[] = {
 static const int SWIPE_COUNT =
     (int)(sizeof(SWIPE_ORDER) / sizeof(SWIPE_ORDER[0]));
 
+static bool is_instrument(screen_id_t screen)
+{
+    for(int i = 0; i < SWIPE_COUNT; i++)
+        if(SWIPE_ORDER[i] == screen)
+            return true;
+
+    return false;
+}
+
+bool screen_manager_visible(screen_id_t screen)
+{
+    return screen < SCREEN_COUNT &&
+           (app_settings().hidden_screens & (1u << screen)) == 0;
+}
+
 static void on_gesture(lv_event_t *e)
 {
     (void)e;
@@ -154,6 +174,15 @@ static void on_gesture(lv_event_t *e)
         return;
 
     const int step = (dir == LV_DIR_LEFT) ? 1 : SWIPE_COUNT - 1;
+    int next = position;
+
+    /* On round to the next one shown; none other shown, nowhere to go. */
+    do
+        next = (next + step) % SWIPE_COUNT;
+    while(next != position && !screen_manager_visible(SWIPE_ORDER[next]));
+
+    if(next == position)
+        return;
 
     /*
      * The finger is still down. Without this its release would still
@@ -163,7 +192,7 @@ static void on_gesture(lv_event_t *e)
     lv_indev_wait_release(indev);
     s_have_tap = false;
 
-    screen_manager_show(SWIPE_ORDER[(position + step) % SWIPE_COUNT]);
+    screen_manager_show(SWIPE_ORDER[next]);
 }
 
 static void on_menu_button(lv_event_t *e)
@@ -305,8 +334,20 @@ void screen_manager_create(lv_obj_t *horizon_screen)
 
     s_current = SCREEN_HORIZON;
 
-    /* Back where it was left. */
-    screen_manager_show((screen_id_t)app_settings().screen);
+    /* Back where it was left - unless it has been hidden since, then
+     * the first instrument shown. */
+    screen_id_t start = (screen_id_t)app_settings().screen;
+
+    if(start >= SCREEN_COUNT || !screen_manager_visible(start))
+    {
+        start = SCREEN_SETTINGS;
+
+        for(int i = SWIPE_COUNT - 1; i >= 0; i--)
+            if(screen_manager_visible(SWIPE_ORDER[i]))
+                start = SWIPE_ORDER[i];
+    }
+
+    screen_manager_show(start);
 }
 
 void screen_manager_show(screen_id_t screen)
@@ -341,4 +382,42 @@ static void take_request(lv_timer_t *timer)
     s_requested = -1;
     menu_close();
     screen_manager_show((screen_id_t)requested);
+}
+
+int screen_manager_instrument_count(void)
+{
+    return SWIPE_COUNT;
+}
+
+screen_id_t screen_manager_instrument(int position)
+{
+    return SWIPE_ORDER[position];
+}
+
+const char *screen_manager_name(screen_id_t screen)
+{
+    return (screen < SCREEN_COUNT) ? SCREEN_NAMES[screen] : "";
+}
+
+bool screen_manager_set_visible(screen_id_t screen, bool visible)
+{
+    if(!is_instrument(screen))
+        return false;
+
+    const uint8_t bit = (uint8_t)(1u << screen);
+    const uint8_t hidden = app_settings().hidden_screens;
+    const uint8_t mask = visible ? (uint8_t)(hidden & ~bit)
+                                 : (uint8_t)(hidden | bit);
+
+    /* At least one instrument stays. */
+    bool any = false;
+
+    for(int i = 0; i < SWIPE_COUNT; i++)
+        any = any || (mask & (1u << SWIPE_ORDER[i])) == 0;
+
+    if(!any)
+        return false;
+
+    app_settings_set_hidden_screens(mask);
+    return true;
 }

@@ -8,6 +8,8 @@
  * A double tap on any part of a screen that is not a control opens the
  * menu; a single tap outside it closes it again. A swipe left or right
  * steps through the instruments - not settings or diagnostics.
+ * Instruments can be hidden in settings - the HSI with no GPS fitted,
+ * say: they are then left out of both, though still there to be shown.
  *
  * Widgets on a screen that should let taps through - instrument
  * drawings, panels - must not be clickable, so the tap falls through to
@@ -41,6 +43,16 @@ void screen_manager_create(lv_obj_t *horizon_screen);
 
 /* From the LVGL task. */
 void screen_manager_show(screen_id_t screen);
+
+/* The instruments that can be hidden, in swipe order, and their names. */
+int screen_manager_instrument_count(void);
+screen_id_t screen_manager_instrument(int position);
+const char *screen_manager_name(screen_id_t screen);
+
+/* From the LVGL task. Kept across restarts. False, and nothing done, for
+ * hiding the last instrument shown - or a screen that is not one. */
+bool screen_manager_visible(screen_id_t screen);
+bool screen_manager_set_visible(screen_id_t screen, bool visible);
 
 /* From any task: shown at the LVGL task's next look, within 100 ms. For
  * the Wi-Fi debug page, which runs in the web server's task. */

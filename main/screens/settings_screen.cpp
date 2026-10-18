@@ -7,6 +7,7 @@
 #include "navigation.h"
 #include "display_st7701.h"
 #include "magnetometer.h"
+#include "screen_manager.h"
 #include "sensor_readings.h"
 #include "wifi_debug.h"
 
@@ -82,6 +83,41 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text,
     lv_obj_center(label);
 
     return button;
+}
+
+/* A row: a name on the left, a switch on the right. Returns the switch. */
+static lv_obj_t *make_switch_row(lv_obj_t *parent, const char *text,
+                                 const lv_font_t *font, bool checked,
+                                 lv_event_cb_t on_change, void *user_data)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, 260, 40);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = lv_label_create(row);
+
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_font(label, font, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(TEXT_COLOUR), 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t *toggle = lv_switch_create(row);
+
+    lv_obj_set_size(toggle, 70, 36);
+    lv_obj_align(toggle, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(toggle, lv_color_hex(0x303840), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(toggle, lv_color_hex(SELECTED_COLOUR),
+                              (uint32_t)LV_PART_INDICATOR | LV_STATE_CHECKED);
+
+    if(checked)
+        lv_obj_add_state(toggle, LV_STATE_CHECKED);
+
+    lv_obj_add_event_cb(toggle, on_change, LV_EVENT_VALUE_CHANGED, user_data);
+
+    return toggle;
 }
 
 static void set_status(lv_obj_t *label, uint32_t colour, const char *text)
@@ -335,6 +371,38 @@ static void make_display_section(lv_obj_t *screen)
     show_brightness(app_settings().brightness);
 }
 
+/* ---- screens ---------------------------------------------------------------- */
+
+static void on_screen_shown(lv_event_t *e)
+{
+    lv_obj_t *toggle = lv_event_get_target(e);
+    const screen_id_t screen =
+        (screen_id_t)(intptr_t)lv_event_get_user_data(e);
+    const bool shown = lv_obj_has_state(toggle, LV_STATE_CHECKED);
+
+    /* Refused for the last one shown: back on. */
+    if(!screen_manager_set_visible(screen, shown))
+        lv_obj_add_state(toggle, LV_STATE_CHECKED);
+}
+
+static void make_screens_section(lv_obj_t *screen)
+{
+    make_text(screen, FONT_BODY, SECTION_COLOUR, "SCREENS");
+
+    for(int i = 0; i < screen_manager_instrument_count(); i++)
+    {
+        const screen_id_t id = screen_manager_instrument(i);
+
+        make_switch_row(screen, screen_manager_name(id), FONT_BODY,
+                        screen_manager_visible(id), on_screen_shown,
+                        (void *)(intptr_t)id);
+    }
+
+    make_text(screen, FONT_SMALL, HINT_COLOUR,
+              "Off: left out of the swipes and the menu - the HSI "
+              "with no GPS fitted, say. One stays on.");
+}
+
 /* ---- mounting --------------------------------------------------------------- */
 
 static lv_obj_t *s_level_status = NULL;
@@ -522,32 +590,8 @@ static void make_wifi_section(lv_obj_t *screen)
 {
     make_text(screen, FONT_BODY, SECTION_COLOUR, "WI-FI DEBUG");
 
-    lv_obj_t *row = lv_obj_create(screen);
-
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, 260, 40);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *label = lv_label_create(row);
-
-    lv_label_set_text(label, "Wi-Fi debug");
-    lv_obj_set_style_text_font(label, FONT_LARGE, 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(TEXT_COLOUR), 0);
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
-
-    lv_obj_t *toggle = lv_switch_create(row);
-
-    lv_obj_set_size(toggle, 70, 36);
-    lv_obj_align(toggle, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(toggle, lv_color_hex(0x303840), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(toggle, lv_color_hex(SELECTED_COLOUR),
-                              (uint32_t)LV_PART_INDICATOR | LV_STATE_CHECKED);
-
-    if(app_settings().wifi_debug)
-        lv_obj_add_state(toggle, LV_STATE_CHECKED);
-
-    lv_obj_add_event_cb(toggle, on_wifi_debug, LV_EVENT_VALUE_CHANGED, NULL);
+    make_switch_row(screen, "Wi-Fi debug", FONT_LARGE,
+                    app_settings().wifi_debug, on_wifi_debug, NULL);
 
     s_wifi_status = make_text(screen, FONT_BODY, HINT_COLOUR, "");
 
@@ -634,6 +678,7 @@ void settings_screen_create(lv_obj_t *screen)
     make_text(screen, FONT_LARGE, TEXT_COLOUR, "SETTINGS");
 
     make_display_section(screen);
+    make_screens_section(screen);
     make_mounting_section(screen);
     make_wifi_section(screen);
 

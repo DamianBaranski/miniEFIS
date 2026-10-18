@@ -258,7 +258,9 @@ outside the menu closes it.
 A swipe left or right steps through the five instruments - horizon,
 altimeter, turn coordinator, compass, HSI, and round again - but not
 settings or diagnostics; a swipe that starts on a control does not
-also press it. LVGL 8 has no double
+also press it. An instrument switched off under SCREENS in settings -
+the HSI with no GPS fitted, say - is left out of both the swipes and
+the menu; one always stays on. LVGL 8 has no double
 click event, so `main/screens/screen_manager.cpp` builds one from two short clicks within
 500 ms and 60 px of each other, caught on the screen object itself.
 Controls take their own taps, so anything drawn on a screen that should
@@ -331,7 +333,7 @@ crashed while building the menu. The start-up log prints the figure.
   for testing, `--offset` to one side of it and `--above` over its
   path.
 * **Settings** - units (m and m/s, or ft and ft/min), backlight,
-  mounting alignment, Wi-Fi debug, and the magnetometer's calibration.
+  which instruments are shown, mounting alignment, Wi-Fi debug, and the magnetometer's calibration.
 
   **Set level**, under MOUNTING, is for a unit not square in the panel:
   with the aircraft level and still it averages gravity for two seconds,

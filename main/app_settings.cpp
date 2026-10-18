@@ -5,6 +5,7 @@
 #include "lvgl.h"
 #include "nvs.h"
 
+#include <stddef.h>
 #include <string.h>
 
 static const char *TAG = "settings";
@@ -29,14 +30,19 @@ struct Stored
     uint8_t brightness;
     uint8_t wifi_debug;     /* was reserved, 0: older blobs read as off */
     float qnh_pa;
+    uint8_t hidden_screens; /* added later: older blobs end before it */
 };
+
+/* A blob saved before hidden_screens: read as all shown. */
+static const size_t STORED_SIZE_V1 = offsetof(Stored, qnh_pa) + sizeof(float);
 
 static app_settings_t s_settings = {
     0,                              /* the horizon */
     UNITS_METRIC,
     BARO_SEA_LEVEL_STANDARD_PA,
     80,
-    false
+    false,
+    0
 };
 
 static lv_timer_t *s_save_timer = NULL;
@@ -55,6 +61,7 @@ static void save_now(lv_timer_t *timer)
     stored.brightness = s_settings.brightness;
     stored.wifi_debug = s_settings.wifi_debug ? 1 : 0;
     stored.qnh_pa = s_settings.qnh_pa;
+    stored.hidden_screens = s_settings.hidden_screens;
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
@@ -96,13 +103,15 @@ void app_settings_init(void)
     }
 
     Stored stored;
+    memset(&stored, 0, sizeof(stored));
     size_t length = sizeof(stored);
 
     const esp_err_t err = nvs_get_blob(handle, NVS_KEY, &stored, &length);
 
     nvs_close(handle);
 
-    if(err != ESP_OK || length != sizeof(stored) ||
+    if(err != ESP_OK ||
+       (length != sizeof(stored) && length != STORED_SIZE_V1) ||
        stored.version != STORED_VERSION)
     {
         ESP_LOGW(TAG, "saved settings unreadable, using defaults");
@@ -113,6 +122,7 @@ void app_settings_init(void)
     s_settings.units = (stored.units == UNITS_AVIATION) ? UNITS_AVIATION
                                                         : UNITS_METRIC;
     s_settings.wifi_debug = (stored.wifi_debug == 1);
+    s_settings.hidden_screens = stored.hidden_screens;
 
     if(stored.brightness >= BRIGHTNESS_MIN && stored.brightness <= 100)
         s_settings.brightness = stored.brightness;
@@ -121,9 +131,10 @@ void app_settings_init(void)
     if(stored.qnh_pa >= 87000.0f && stored.qnh_pa <= 108500.0f)
         s_settings.qnh_pa = stored.qnh_pa;
 
-    ESP_LOGI(TAG, "screen %u, %s, QNH %.1f hPa, backlight %u%%, "
-             "Wi-Fi debug %s",
+    ESP_LOGI(TAG, "screen %u, hidden 0x%02x, %s, QNH %.1f hPa, "
+             "backlight %u%%, Wi-Fi debug %s",
              (unsigned)s_settings.screen,
+             (unsigned)s_settings.hidden_screens,
              s_settings.units == UNITS_AVIATION ? "ft" : "m",
              s_settings.qnh_pa / 100.0f, (unsigned)s_settings.brightness,
              s_settings.wifi_debug ? "on" : "off");
@@ -181,5 +192,14 @@ void app_settings_set_wifi_debug(bool enabled)
         return;
 
     s_settings.wifi_debug = enabled;
+    save_later();
+}
+
+void app_settings_set_hidden_screens(uint8_t mask)
+{
+    if(mask == s_settings.hidden_screens)
+        return;
+
+    s_settings.hidden_screens = mask;
     save_later();
 }

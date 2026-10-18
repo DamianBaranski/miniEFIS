@@ -15,6 +15,7 @@ W jednym samolocie może pracować kilka MiniEFIS korzystających z tych samych 
 ## Obsługa
 - **Podwójne stuknięcie** w ekran otwiera **menu** z listą wszystkich ekranów. Stuknięcie poza menu je zamyka.
 - **Przesunięcie palcem w lewo lub w prawo** przełącza przyrządy po kolei: horyzont → wysokościomierz → zakrętomierz → kompas → HSI i znowu od początku. Ustawienia i diagnostyka są dostępne tylko z menu.
+- **Niepotrzebne ekrany można wyłączyć** w ustawieniach, np. HSI, gdy nie ma modułu GPS. Wyłączony ekran znika z menu i jest pomijany przy przesuwaniu.
 - Urządzenie **pamięta ostatni ekran** i wszystkie ustawienia, także po wyłączeniu zasilania.
 
 ---
@@ -77,6 +78,7 @@ W jednym samolocie może pracować kilka MiniEFIS korzystających z tych samych 
 ## 6. Ustawienia
 - **Jednostki:** metryczne albo lotnicze.
 - **Jasność ekranu.**
+- **Ekrany:** włączanie i wyłączanie poszczególnych przyrządów. Co najmniej jeden zostaje włączony.
 - **„Set level”:** korekta, gdy urządzenie jest zamontowane krzywo w tablicy. Wykonuje się ją przy wypoziomowanym, nieruchomym samolocie.
 - **Kalibracja kompasu:** prowadzi krok po kroku przez obracanie samolotu.
 - **Wi-Fi:** włącza dostęp do urządzenia z telefonu lub komputera.
