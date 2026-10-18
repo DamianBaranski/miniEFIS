@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  An example route for the HSI screen: a circuit of four waypoints
+  around Warsaw Chopin (EPWA), 3 to 5 NM a leg, with heights so the
+  vertical path shows too. Load it on the debug page's Route section,
+  then fly it with
+    python3 tools/gps_emulator.py -i seeedstudio -c /dev/ttyUSB0 \
+        - -gpx tools/example_route.gpx - -speed 60 - -offset 300
+  (the options with two dashes; XML comments may not hold them).
+-->
+<gpx version="1.1" creator="miniEFIS" xmlns="http://www.topografix.com/GPX/1/1">
+  <rte>
+    <name>EPWA circuit</name>
+    <rtept lat="52.1657" lon="20.9671"><ele>110</ele><name>EPWA</name></rtept>
+    <rtept lat="52.2300" lon="21.0500"><ele>400</ele><name>NORTH</name></rtept>
+    <rtept lat="52.1800" lon="21.1500"><ele>500</ele><name>EAST</name></rtept>
+    <rtept lat="52.1100" lon="21.0300"><ele>300</ele><name>SOUTH</name></rtept>
+  </rte>
+</gpx>

@@ -4,6 +4,7 @@
 #include "app_settings.h"
 #include "compass_screen.h"
 #include "diagnostics_screen.h"
+#include "hsi_screen.h"
 #include "settings_screen.h"
 #include "turn_coordinator_screen.h"
 
@@ -30,6 +31,7 @@ static const char *const SCREEN_NAMES[SCREEN_COUNT] = {
     "Altimeter",
     "Turn coordinator",
     "Compass",
+    "HSI",
     "Settings",
     "Diagnostics",
 };
@@ -107,13 +109,14 @@ static void on_tap(lv_event_t *e)
  * A swipe left or right steps through the instruments, round and round:
  * left for the next, right for the previous. Settings and diagnostics
  * are not in the round - they are reached from the menu, and swiping
- * on them does nothing.
+ * on them does nothing. A swipe down on the HSI opens its route menu.
  */
 static const screen_id_t SWIPE_ORDER[] = {
     SCREEN_HORIZON,
     SCREEN_ALTIMETER,
     SCREEN_TURN_COORDINATOR,
     SCREEN_COMPASS,
+    SCREEN_HSI,
 };
 
 static const int SWIPE_COUNT =
@@ -128,6 +131,15 @@ static void on_gesture(lv_event_t *e)
 
     lv_indev_t *indev = lv_indev_get_act();
     const lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+
+    /* Down on the HSI, from the top: its route menu. */
+    if(dir == LV_DIR_BOTTOM && s_current == SCREEN_HSI)
+    {
+        lv_indev_wait_release(indev);
+        s_have_tap = false;
+        hsi_screen_open_menu();
+        return;
+    }
 
     if(dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT)
         return;
@@ -189,7 +201,7 @@ static void create_menu(void)
 
     s_menu = lv_obj_create(lv_layer_top());
 
-    /* Two columns: six screens in one would run off the round panel. */
+    /* Two columns: seven screens in one would run off the round panel. */
     lv_obj_set_size(s_menu, 340, LV_SIZE_CONTENT);
     lv_obj_center(s_menu);
     lv_obj_clear_flag(s_menu, LV_OBJ_FLAG_SCROLLABLE);
@@ -270,6 +282,9 @@ void screen_manager_create(lv_obj_t *horizon_screen)
 
     s_screens[SCREEN_COMPASS] = create_screen();
     compass_screen_create(s_screens[SCREEN_COMPASS]);
+
+    s_screens[SCREEN_HSI] = create_screen();
+    hsi_screen_create(s_screens[SCREEN_HSI]);
 
     s_screens[SCREEN_SETTINGS] = create_screen();
     settings_screen_create(s_screens[SCREEN_SETTINGS]);

@@ -14,7 +14,10 @@ any USB-CAN adapter python-can drives:
 
 The simulated aircraft flies a circle - or a straight line with
 --radius 0 - at a steady ground speed, climbing at --climb, with
-optional noise on the position. --fix none emulates a GPS without a fix,
+optional noise on the position. --gpx flies a GPX file's route instead,
+leg after leg as the MiniEFIS's HSI expects: --offset puts it to one
+side of each leg, --above over the path between the waypoints'
+heights. --fix none emulates a GPS without a fix,
 sending its fields as "not available". The debug page's CAN bus section
 then shows each message arriving and its values.
 
@@ -26,6 +29,7 @@ then shows each message arriving and its values.
     python3 tools/gps_emulator.py -i pcan -c PCAN_USBBUS1
     python3 tools/gps_emulator.py --radius 0 --track 270 --speed 40
     python3 tools/gps_emulator.py --fix none
+    python3 tools/gps_emulator.py --gpx trip.gpx --speed 60 --offset 300
 
 Adapters:
   socketcan  candleLight / gs_usb firmware, PEAK, Kvaser and most others
@@ -65,6 +69,7 @@ import random
 import struct
 import sys
 import time
+import xml.etree.ElementTree as ElementTree
 
 try:
     import can
@@ -151,6 +156,115 @@ class Flight:
         alt = self.alt0 + self.climb * t
 
         return lat, lon, alt, math.degrees(track) % 360.0, self.climb
+
+
+def destination(lat, lon, bearing, distance):
+    """Where a great circle from (lat, lon) at bearing (deg) reaches
+    after distance (m)."""
+    p1, l1, b = math.radians(lat), math.radians(lon), math.radians(bearing)
+    d = distance / EARTH_RADIUS_M
+    p2 = math.asin(math.sin(p1) * math.cos(d) +
+                   math.cos(p1) * math.sin(d) * math.cos(b))
+    l2 = l1 + math.atan2(math.sin(b) * math.sin(d) * math.cos(p1),
+                         math.cos(d) - math.sin(p1) * math.sin(p2))
+    return math.degrees(p2), math.degrees(l2)
+
+
+def distance_bearing(lat1, lon1, lat2, lon2):
+    """Great circle distance (m) and initial bearing (deg)."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lon2 - lon1)
+    a = (math.sin((p2 - p1) / 2) ** 2 +
+         math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2)
+    distance = 2 * EARTH_RADIUS_M * math.atan2(math.sqrt(a),
+                                               math.sqrt(1 - a))
+    bearing = math.degrees(math.atan2(
+        math.sin(dl) * math.cos(p2),
+        math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) *
+        math.cos(dl)))
+    return distance, bearing % 360.0
+
+
+def read_gpx(path):
+    """[(lat, lon, ele or None, name)]: the first route, else the
+    waypoints, else the track - the order the MiniEFIS takes them in."""
+    root = ElementTree.parse(path).getroot()
+
+    def local(tag):
+        return tag.rsplit("}", 1)[-1]
+
+    def children(element, name):
+        return [c for c in element if local(c.tag) == name]
+
+    def all_named(name):
+        return [e for e in root.iter() if local(e.tag) == name]
+
+    routes = all_named("rte")
+    points = (children(routes[0], "rtept") if routes else []) or \
+        all_named("wpt") or all_named("trkpt")
+
+    result = []
+    for number, point in enumerate(points, 1):
+        ele = children(point, "ele")
+        name = children(point, "name")
+        result.append((float(point.get("lat")), float(point.get("lon")),
+                       float(ele[0].text) if ele else None,
+                       name[0].text.strip() if name else "WP%d" % number))
+    return result
+
+
+class RouteFlight:
+    """Flies a GPX route leg after leg, round again after the last."""
+
+    def __init__(self, args):
+        self.points = read_gpx(args.gpx)
+        if len(self.points) < 2:
+            sys.exit("%s: need at least two points" % args.gpx)
+
+        self.speed = args.speed
+        self.offset = args.offset
+        self.above = args.above
+        self.alt = args.alt
+        self.noise = args.noise
+        self.heights = all(p[2] is not None for p in self.points)
+
+        # (start, length, bearing) of each leg, closed back to the start.
+        self.legs = []
+        for a, b in zip(self.points, self.points[1:] + self.points[:1]):
+            length, bearing = distance_bearing(a[0], a[1], b[0], b[1])
+            self.legs.append((a, b, length, bearing))
+        self.total = sum(leg[2] for leg in self.legs)
+
+        names = " - ".join(p[3] for p in self.points)
+        print("flying %s, %.1f NM round" % (names, self.total / 1852.0))
+
+    def at(self, t):
+        """(lat, lon, altitude, track, vertical speed) at t seconds."""
+        along = (self.speed * t) % self.total
+        for a, b, length, bearing in self.legs:
+            if along <= length:
+                break
+            along -= length
+
+        lat, lon = destination(a[0], a[1], bearing, along)
+        remaining, track = distance_bearing(lat, lon, b[0], b[1])
+        if remaining < 1.0:
+            track = bearing
+
+        # To the right of the leg: square to the track there.
+        side = self.offset + (random.gauss(0.0, self.noise)
+                              if self.noise > 0 else 0.0)
+        if side != 0.0:
+            lat, lon = destination(lat, lon, track + 90.0, side)
+
+        if self.heights:
+            fraction = along / length if length > 0 else 1.0
+            alt = a[2] + (b[2] - a[2]) * fraction + self.above
+            climb = (b[2] - a[2]) / length * self.speed if length > 0 else 0.0
+        else:
+            alt, climb = self.alt, 0.0
+
+        return lat, lon, alt, track, climb
 
 
 class Sender:
@@ -255,6 +369,16 @@ def parse_arguments():
                         help="vertical speed, m/s, up positive")
     flight.add_argument("--noise", type=float, default=0.0,
                         help="position noise, m (1 sigma)")
+    flight.add_argument("--gpx", metavar="FILE",
+                        help="fly this GPX file's route (start at its "
+                             "first point) instead of a circle")
+    flight.add_argument("--offset", type=float, default=0.0,
+                        help="with --gpx: this far right of each leg, m "
+                             "(negative left)")
+    flight.add_argument("--above", type=float, default=0.0,
+                        help="with --gpx: this far above the path between "
+                             "the waypoints' heights, m (if every one has "
+                             "<ele>; --alt otherwise)")
 
     gps = parser.add_argument_group("receiver")
     gps.add_argument("--rate", type=float, default=10.0,
@@ -293,7 +417,7 @@ def main():
         bus.init_frame()
         time.sleep(SEEED_SETTLE_S)
 
-    flight = Flight(args)
+    flight = RouteFlight(args) if args.gpx else Flight(args)
     sender = Sender(bus, SEEED_GAP_S if args.interface == "seeedstudio"
                     else 0.0)
     fix_type = FIX_TYPES[args.fix]

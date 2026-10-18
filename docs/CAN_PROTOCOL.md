@@ -11,8 +11,9 @@ Each box is set up locally, by its own button, jumper or USB. Limits and
 warnings are decided on the EFIS from the values it receives.
 
 Status: receiving is implemented (`main/can_bus.cpp`, shown on the debug
-web page and at `GET /can`); the screens and the attitude filter do not
-use the data yet, and the CAN BUS setting is not there yet.
+web page and at `GET /can`). The HSI screen uses the GPS messages
+(0x200-0x202); the other screens and the attitude filter do not use the
+data yet, and the CAN BUS setting is not there yet.
 
 ## 1. Physical layer
 

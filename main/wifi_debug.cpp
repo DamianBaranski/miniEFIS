@@ -5,6 +5,7 @@
 #include "screen_manager.h"
 #include "update_screen.h"
 #include "magnetometer.h"
+#include "route_store.h"
 #include "web_log.h"
 
 #include "board_pins.h"
@@ -269,10 +270,12 @@ white-space:pre-wrap;padding:8px;margin:0}
 #compass canvas{height:auto;aspect-ratio:1}
 .cs{font:12px monospace;color:#aab;margin-top:4px;min-height:3.5em;white-space:pre-wrap}
 .ok{color:#4f4}.bad{color:#fa4}
-#can{border-collapse:collapse;font:12px monospace}
-#can td,#can th{padding:2px 8px;border-bottom:1px solid #223;text-align:left;vertical-align:top}
-#can th{color:#aab;font-weight:normal}
+#can,#route{border-collapse:collapse;font:12px monospace}
+#can td,#can th,#route td,#route th{padding:2px 8px;border-bottom:1px solid #223;text-align:left;vertical-align:top}
+#can th,#route th{color:#aab;font-weight:normal}
 #can tr.stale td{color:#667}
+#route tr.to td{color:#ff30d0}
+#route button{padding:1px 8px;font-size:12px}
 .W{color:#ffd400}.E{color:#ff5050}
 button,input{font:inherit;padding:5px 10px}
 progress{width:240px}
@@ -298,6 +301,12 @@ progress{width:240px}
 <h2>CAN bus <span id="canstate" style="font-weight:normal;color:#889">...</span></h2>
 <table id="can"></table>
 <div class="cs" id="cannodes"></div>
+</section>
+<section>
+<h2>Route <span id="routestate" style="font-weight:normal;color:#889">...</span></h2>
+<input type="file" id="gpx" accept=".gpx"> <button onclick="loadGpx()">Load GPX</button>
+<button onclick="clearRoute()">Clear</button> <span id="gpxresult"></span>
+<table id="route"></table>
 </section>
 <section>
 <h2>Log <label style="font-weight:normal;color:#aab">
@@ -581,6 +590,37 @@ async function pollCan(){
   catch(e){document.getElementById('canstate').textContent='not responding';}
   setTimeout(pollCan,1000);
 }
+const NM=1852,esc=t=>t.replace(/[&<>"]/g,c=>'&#'+c.charCodeAt(0)+';');
+function drawRoute(r){
+  const g=r.guidance,f=(v,d)=>v===null?'-':v.toFixed(d);
+  document.getElementById('routestate').textContent=!r.count?'no route':
+    (r.fix?'GPS fix':'no GPS')+(r.active>=0?', '+(r.direct?'direct ':'')+'to '+r.wpts[r.active].name:'')+
+    (g?', '+f(g.dist_m/NM,1)+' NM at '+f(g.brg_deg,0)+', XTE '+f(Math.abs(g.xte_m)/NM,2)+' NM '+
+      (g.xte_m>0?'R':'L')+(g.vdev_m!==null?', '+f(g.vdev_m,0)+' m off the path':''):'');
+  let h=r.count?'<tr><th>#</th><th>name</th><th>lat</th><th>lon</th><th>ele m</th><th>leg</th><th>NM</th><th></th></tr>':'';
+  r.wpts.forEach((w,i)=>{
+    h+='<tr'+(i===r.active?' class="to"':'')+'><td>'+(i+1)+'</td><td>'+esc(w.name)+'</td><td>'+w.lat.toFixed(5)+
+      '</td><td>'+w.lon.toFixed(5)+'</td><td>'+f(w.ele_m,0)+'</td><td>'+f(w.leg_deg,0)+'</td><td>'+
+      (w.leg_m===null?'-':(w.leg_m/NM).toFixed(1))+'</td><td><button onclick="direct('+i+')">direct</button></td></tr>';
+  });
+  document.getElementById('route').innerHTML=h;
+}
+async function pollRoute(){
+  try{drawRoute(await(await fetch('/route')).json());}
+  catch(e){document.getElementById('routestate').textContent='not responding';}
+}
+async function loadGpx(){
+  const file=document.getElementById('gpx').files[0],out=document.getElementById('gpxresult');
+  if(!file){out.textContent='choose a .gpx file first';return;}
+  const r=await fetch('/route',{method:'POST',body:file});
+  out.textContent=await r.text();out.className=r.ok?'ok':'bad';pollRoute();
+}
+async function clearRoute(){
+  if(!confirm('Clear the route?'))return;
+  await fetch('/route',{method:'DELETE'});pollRoute();
+}
+async function direct(i){await fetch('/route/direct?wpt='+i,{method:'POST'});pollRoute();}
+pollRoute();setInterval(pollRoute,2000);
 pollCan();
 poll();status();setInterval(status,3000);
 </script></body></html>
@@ -826,7 +866,7 @@ static esp_err_t handle_screen(httpd_req_t *req)
     if(httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
        httpd_query_key_value(query, "id", value, sizeof(value)) != ESP_OK)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                                   "screen?id=N, 0 to 5");
+                                   "screen?id=N, from 0");
 
     const int id = atoi(value);
 
@@ -1176,6 +1216,187 @@ static esp_err_t handle_can(httpd_req_t *req)
     free(json);
 
     return err;
+}
+
+/* ---- route ------------------------------------------------------------------ */
+
+/* GPX files bigger than this are refused unread. */
+static const size_t GPX_MAX_BYTES = 512 * 1024;
+
+/*
+ * GET /route: the route and the guidance along it, JSON - "count",
+ * "active" (index, -1 none), "direct", the GPS "fix" and "track_deg",
+ * "guidance" (null without a fix) and every waypoint with the leg into
+ * it from the one before.
+ */
+static esp_err_t handle_route_get(httpd_req_t *req)
+{
+    Route *route = (Route *)heap_caps_malloc(sizeof(Route), MALLOC_CAP_SPIRAM);
+
+    static const size_t JSON_BYTES = 24 * 1024;
+    char *json = (char *)heap_caps_malloc(JSON_BYTES, MALLOC_CAP_SPIRAM);
+
+    if(route == NULL || json == NULL)
+    {
+        free(route);
+        free(json);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "out of memory");
+    }
+
+    route_status_t status;
+    route_store_status(&status);
+    route_store_get(route);
+
+    const RouteGuidance &g = status.guidance;
+    size_t n = 0;
+
+    auto add = [&](const char *format, auto... values) {
+        if(n < JSON_BYTES)
+            n += snprintf(json + n, JSON_BYTES - n, format, values...);
+    };
+
+    /* A value, or null - JSON has no NaN. */
+    auto number = [&](const char *format, float value) {
+        if(isfinite(value))
+            add(format, (double)value);
+        else
+            add("null");
+    };
+
+    add("{\"count\":%d,\"active\":%d,\"direct\":%s,\"fix\":%s,\"track_deg\":",
+        route->count, g.to, g.direct ? "true" : "false",
+        status.have_fix ? "true" : "false");
+    number("%.1f", status.have_track ? status.track_deg : NAN);
+    add(",\"gs_ms\":");
+    number("%.1f", status.ground_speed_ms);
+    add(",\"alt_m\":");
+    number("%.1f", status.altitude_m);
+    add(",\"guidance\":");
+
+    if(g.valid)
+    {
+        add("{\"dist_m\":%.0f,\"brg_deg\":%.1f,\"dtk_deg\":%.1f,"
+            "\"xte_m\":%.0f,\"to_go_m\":%.0f,\"vdev_m\":",
+            g.distance_m, (double)g.bearing_deg,
+            (double)g.desired_track_deg, (double)g.cross_track_m,
+            (double)g.along_track_to_go_m);
+        number("%.0f", g.vertical_valid ? g.vertical_deviation_m : NAN);
+        add("}");
+    }
+    else
+    {
+        add("null");
+    }
+
+    add(",\"wpts\":[");
+
+    for(int i = 0; i < route->count; i++)
+    {
+        const RouteWaypoint &w = route->waypoint[i];
+        char name[ROUTE_NAME_BYTES * 6];
+        json_escape(w.name, name, sizeof(name));
+
+        add("%s{\"name\":\"%s\",\"lat\":%.7f,\"lon\":%.7f,\"ele_m\":",
+            i ? "," : "", name, w.lat_deg, w.lon_deg);
+        number("%.0f", w.elevation_m);
+
+        if(i > 0)
+        {
+            const RouteWaypoint &p = route->waypoint[i - 1];
+
+            add(",\"leg_m\":%.0f,\"leg_deg\":%.1f}",
+                route_distance_m(p.lat_deg, p.lon_deg, w.lat_deg, w.lon_deg),
+                route_bearing_deg(p.lat_deg, p.lon_deg, w.lat_deg, w.lon_deg));
+        }
+        else
+        {
+            add(",\"leg_m\":null,\"leg_deg\":null}");
+        }
+    }
+
+    add("]}");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    const esp_err_t err = (n < JSON_BYTES)
+        ? httpd_resp_send(req, json, (ssize_t)n)
+        : httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                              "too long");
+
+    free(route);
+    free(json);
+
+    return err;
+}
+
+/* POST /route: the body is a GPX file. It replaces the route. */
+static esp_err_t handle_route_post(httpd_req_t *req)
+{
+    if(req->content_len == 0 || req->content_len > GPX_MAX_BYTES)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "send a GPX file, up to 512 KB");
+
+    char *text = (char *)heap_caps_malloc(req->content_len, MALLOC_CAP_SPIRAM);
+
+    if(text == NULL)
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "out of memory");
+
+    size_t used = 0;
+
+    while(used < req->content_len)
+    {
+        const int received = httpd_req_recv(req, text + used,
+                                            req->content_len - used);
+
+        if(received == HTTPD_SOCK_ERR_TIMEOUT)
+            continue;
+
+        if(received <= 0)
+        {
+            free(text);
+            return ESP_FAIL;
+        }
+
+        used += (size_t)received;
+    }
+
+    char message[160];
+    const bool loaded = route_store_load_gpx(text, used, message,
+                                             sizeof(message));
+    free(text);
+
+    if(!loaded)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, message);
+
+    return httpd_resp_sendstr(req, message);
+}
+
+/* DELETE /route: no route. */
+static esp_err_t handle_route_delete(httpd_req_t *req)
+{
+    route_store_clear();
+    return httpd_resp_sendstr(req, "route cleared");
+}
+
+/* POST /route/direct?wpt=N: straight from here to waypoint N, from 0. */
+static esp_err_t handle_route_direct(httpd_req_t *req)
+{
+    char query[32];
+    char value[8];
+
+    if(httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+       httpd_query_key_value(query, "wpt", value, sizeof(value)) != ESP_OK)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "route/direct?wpt=N");
+
+    if(!route_store_direct_to(atoi(value)))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "no such waypoint");
+
+    return httpd_resp_sendstr(req, "ok");
 }
 
 /* ---- firmware update ------------------------------------------------------ */
@@ -1574,7 +1795,7 @@ static void start_server(void)
     config.stack_size = SERVER_STACK_BYTES;
     config.task_priority = TASK_PRIORITY;
     config.lru_purge_enable = true;
-    config.max_uri_handlers = 16;       /* the default 8 is all taken */
+    config.max_uri_handlers = 20;       /* the default 8 is all taken */
 
     if(httpd_start(&s_server, &config) != ESP_OK)
     {
@@ -1591,6 +1812,10 @@ static void start_server(void)
         { "/telemetry", HTTP_GET, handle_telemetry, NULL },
         { "/compass",  HTTP_GET,  handle_compass,  NULL },
         { "/can",      HTTP_GET,  handle_can,      NULL },
+        { "/route",    HTTP_GET,  handle_route_get, NULL },
+        { "/route",    HTTP_POST, handle_route_post, NULL },
+        { "/route",    HTTP_DELETE, handle_route_delete, NULL },
+        { "/route/direct", HTTP_POST, handle_route_direct, NULL },
         { "/screenshot.bmp", HTTP_GET, handle_screenshot, NULL },
         { "/screen",   HTTP_GET,  handle_screen,   NULL },
         { "/coredump", HTTP_GET,  handle_coredump, NULL },

@@ -18,14 +18,15 @@ add_library(ahrs
     ../components/ahrs/mag_calibration.cpp
     ../components/ahrs/turn_coordinator.cpp
     ../components/ahrs/navigator.cpp
-    ../components/ahrs/mounting_alignment.cpp)
+    ../components/ahrs/mounting_alignment.cpp
+    ../components/ahrs/route.cpp)
 target_include_directories(ahrs PUBLIC ../components/ahrs/include)
 target_compile_options(ahrs PRIVATE -Wall -Wextra)
 
 enable_testing()
 
 foreach(suite attitude_filter vertical_channel mag_calibration turn_coordinator navigator
-              mounting_alignment)
+              mounting_alignment route)
     add_executable(test_${suite} test_${suite}.cpp)
     target_link_libraries(test_${suite} PRIVATE ahrs m)
     target_compile_options(test_${suite} PRIVATE -Wall -Wextra)

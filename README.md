@@ -83,8 +83,10 @@ slip, altitude - through a standard rate turn and a climb. The turn
 coordinator is checked against coordinated, slipping and skidding
 turns, the vertical channel against climbs, accelerometer errors and
 barometer dropouts, the compass swing against a simulated sensor
-with known hard and soft iron errors, and the mounting alignment
-against units tilted in the panel.
+with known hard and soft iron errors, the mounting alignment
+against units tilted in the panel, and the route guidance against GPX
+files of every kind and routes along the equator and a meridian, where
+the cross track and sequencing are easy to check by hand.
 
 `make host-tests` from the build directory runs them. They are also a
 standalone cmake project, which is useful when there is no ESP-IDF around
@@ -116,7 +118,8 @@ main/                 start-up, navigation (what every screen reads), sensors,
 main/screens/         one file pair per screen, the menu that switches them
                       (screen_manager), and the update screen
 main/widgets/         pieces drawn on a screen: the altitude panel
-tools/                PC side: live sensor plot from the serial stream
+tools/                PC side: live sensor plot from the serial stream, GPS
+                      emulator for the CAN bus
 test/                 host build of components/ahrs plus its tests
 ```
 
@@ -147,6 +150,8 @@ other.
 | Altimeter dial, vertical speed scale | `main/screens/altimeter_screen.cpp` |
 | What is saved, defaults, save delay | `main/app_settings.cpp` |
 | Compass card appearance | `main/screens/compass_screen.cpp` |
+| HSI appearance, deviation full scale | `main/screens/hsi_screen.cpp` |
+| GPX reading, cross track, waypoint sequencing | `components/ahrs/route.cpp` |
 | Turn coordinator appearance, symbol scale | `main/screens/turn_coordinator_screen.cpp` |
 | Turn rate and ball damping | `TurnCoordinatorConfig`, `components/ahrs/include/turn_coordinator.h` |
 | Magnetometer calibration UI | `main/screens/settings_screen.cpp` |
@@ -248,9 +253,10 @@ snapshot (`tilt_sigma_deg`, `heading_sigma_deg`, `altitude_sigma_m`,
 
 Double tap the background of any screen to open the menu, which
 switches between the artificial horizon, the altimeter, the turn
-coordinator, the compass, settings and diagnostics; a tap outside the menu closes it.
-A swipe left or right steps through the four instruments - horizon,
-altimeter, turn coordinator, compass, and round again - but not
+coordinator, the compass, the HSI, settings and diagnostics; a tap
+outside the menu closes it.
+A swipe left or right steps through the five instruments - horizon,
+altimeter, turn coordinator, compass, HSI, and round again - but not
 settings or diagnostics; a swipe that starts on a control does not
 also press it. LVGL 8 has no double
 click event, so `main/screens/screen_manager.cpp` builds one from two short clicks within
@@ -289,6 +295,41 @@ crashed while building the menu. The start-up log prints the figure.
   lubber line and aircraft symbol, with the heading below it. It only
   redraws when the heading moves, and costs 35 ms a frame when it does.
   Without a calibrated magnetometer it says so instead of guessing.
+* **HSI** - navigation along a route from a GPX file, from the CAN bus
+  GPS (`docs/CAN_PROTOCOL.md`). The card turns track up: the GPS ground
+  track, true, sits under the lubber line, and below about 4 kt the
+  last good track is held. On the card, the magenta pointer is the
+  bearing to the active waypoint and the green one the leg's desired
+  track. In the middle the magenta bars are the deviation, against
+  three dots a side - fly towards them: the upright bar is the cross
+  track, full scale 1 NM; the level bar the vertical path between the
+  waypoints' heights, full scale 150 m (about 500 ft), shown only when
+  every waypoint of the leg has an `<ele>`. Around them: the active
+  waypoint, the bearing and distance to it, and the cross track error,
+  L or R of the leg - in NM, or km with metric units. All true, no
+  magnetic variation. "NO ROUTE" or "NO GPS" says what is missing.
+
+  A swipe down from the top opens the route's waypoints: tap a name to go direct to it from where the aircraft is
+  now, or LEG beside it to fly the leg into it from the waypoint
+  before. The one flown to now is lit; tap outside the list or Close
+  to leave it.
+
+  The route comes from the debug page's Route section (or `POST
+  /route`): the file's first `<rte>`, else its `<wpt>`s in order, else
+  its track, up to 100 points. It is saved in NVS with the active
+  waypoint, so a restart carries on with the same leg. Loading it goes
+  direct to the first waypoint from where the aircraft is; after that
+  each waypoint is passed when the aircraft is abeam of it, and the leg
+  from it to the next one starts - even with another screen up, since
+  the guidance runs in a task of its own (`main/route_store.cpp`). The
+  last waypoint stays active. The page's "direct" button on any
+  waypoint, or the HSI's own route menu, goes straight there from
+  where the aircraft is now. The
+  maths - great circles on a spherical earth, cross and along track,
+  the vertical path - is `RouteNavigator` in `components/ahrs`, with
+  host tests. `tools/gps_emulator.py --gpx FILE` flies a file's route
+  for testing, `--offset` to one side of it and `--above` over its
+  path.
 * **Settings** - units (m and m/s, or ft and ft/min), backlight,
   mounting alignment, Wi-Fi debug, and the magnetometer's calibration.
 
@@ -413,6 +454,9 @@ The page has:
   own so it does not push the log out: `tools/sensor_plot.py --url
   http://<address>` plots it as it does from the serial port (see
   "Plotting sensor data on a PC").
+* **the route** for the HSI: load a GPX file, see its waypoints and
+  legs, the one flown to and the guidance now, go direct to any of
+  them, or clear it.
 * **firmware update**: choose `build/miniefis.bin` and
   Install. The image is checked - an ESP32-S3 application of this
   project - before anything is erased, written to the other OTA slot,
@@ -423,7 +467,7 @@ The page has:
 Two more addresses, for looking at the screens without the unit in
 front of you: `/screenshot.bmp` is the picture on the panel now, and
 `/screen?id=N` switches to screen N (0 horizon, 1 altimeter, 2 turn
-coordinator, 3 compass, 4 settings, 5 diagnostics):
+coordinator, 3 compass, 4 HSI, 5 settings, 6 diagnostics):
 
 ```sh
 curl "http://192.168.0.124/screen?id=3"
@@ -437,7 +481,7 @@ the unit is at 192.168.0.124.
 
 | Endpoint | Method | Returns / does |
 | --- | --- | --- |
-| `/` | GET | The debug page: charts, compass, CAN bus, log, update, device |
+| `/` | GET | The debug page: charts, compass, CAN bus, route, log, update, device |
 | `/status` | GET | JSON: firmware `version`, `built` date and time, running `partition`, `uptime_s`, free `heap_internal` and `heap_psram` in bytes, `network` (SSID and address, or the access point), `rssi` in dBm, and `reset`: the last reset reason and crash |
 | `/log?from=N` | GET | Text: the log from ring position N on, up to 4 KB per request. The `X-Log-Next` header is the position to ask for next. `from=0` starts with the oldest line kept, and `from=end` returns only the current position |
 | `/stream?from=N` | GET | Text, paged like `/log`: the `$DIAG`/`$COMP` sentences, written only while the Diagnostics or Compass screen is showing. Used by `tools/sensor_plot.py --url` |
@@ -445,7 +489,11 @@ the unit is at 192.168.0.124.
 | `/compass` | GET | JSON: magnetometer `present`; whether a swing is `calibrating`; the `saved` calibration (offset, scale, field); the READY `limits`. During a swing it also has `progress`, the fitted ellipse `fit` and every kept `points` pair |
 | `/can` | GET | JSON: the CAN bus `bus` (state, bit rate, pins, frame counts and rate, unknown IDs, bad lengths, bus errors, frames lost, bus-off count, TX and RX error counters, `rx_level`: the RX pin now, 1 when the bus is idle). Then every protocol message under `msgs`: `id`, `name`, `from`, `period_ms`, `count`, `age_ms` (null if never received), `fresh` (within its timeout) and its decoded values `v` (null = not available). Last, the `nodes` heard by heartbeat. See `docs/CAN_PROTOCOL.md` |
 | `/screenshot.bmp` | GET | The picture on the panel now, a 480x480 16-bit BMP |
-| `/screen?id=N` | GET | Switches to screen N: 0 horizon, 1 altimeter, 2 turn coordinator, 3 compass, 4 settings, 5 diagnostics |
+| `/route` | GET | JSON: the route and the guidance along it - `count`, `active` (the waypoint flown to, from 0; -1 none), `direct`, the GPS `fix`, `track_deg`, `gs_ms`, `alt_m`; `guidance` (null without a fix): `dist_m`, `brg_deg`, `dtk_deg`, `xte_m` (+ right of the leg), `to_go_m` (along the leg to abeam the waypoint), `vdev_m` (+ above the path, null without heights); and `wpts`, each `name`, `lat`, `lon`, `ele_m`, and `leg_m`/`leg_deg` from the one before |
+| `/route` | POST | The body is a GPX file, up to 512 KB: replaces the route, saves it, and goes direct to its first waypoint. The response says how many waypoints, or why the file was refused |
+| `/route` | DELETE | Clears the route |
+| `/route/direct?wpt=N` | POST | Straight from where the aircraft is now to waypoint N, from 0 |
+| `/screen?id=N` | GET | Switches to screen N: 0 horizon, 1 altimeter, 2 turn coordinator, 3 compass, 4 HSI, 5 settings, 6 diagnostics |
 | `/coredump` | GET | The core dump of the last crash as `coredump.elf`, or 404 if none is stored. For `idf.py coredump-info --core coredump.elf` |
 | `/update` | POST | Installs the request body, `build/miniefis.bin`, into the other OTA slot and restarts into it. The response is the result as text. A file that isn't this project's ESP32-S3 application is refused before anything is erased |
 | `/restart` | POST | Restarts the unit |
@@ -455,6 +503,10 @@ the unit is at 192.168.0.124.
 curl http://192.168.0.124/status
 curl -i "http://192.168.0.124/log?from=0"          # X-Log-Next: where to continue
 curl http://192.168.0.124/can | python3 -m json.tool
+curl --data-binary @trip.gpx http://192.168.0.124/route
+curl http://192.168.0.124/route | python3 -m json.tool
+curl -X POST "http://192.168.0.124/route/direct?wpt=2"
+curl -X DELETE http://192.168.0.124/route
 curl -X POST --data-binary @build/miniefis.bin \
      -H "Content-Type: application/octet-stream" http://192.168.0.124/update
 curl -X POST http://192.168.0.124/restart

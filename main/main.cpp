@@ -10,6 +10,7 @@
 #include "magnetometer.h"
 #include "mounting.h"
 #include "navigation.h"
+#include "route_store.h"
 #include "sensor_readings.h"
 #include "screen_manager.h"
 #include "web_log.h"
@@ -175,6 +176,7 @@ extern "C" void app_main(void)
     diagnostics_start();
     sensor_readings_start();
     can_bus_start();
+    route_store_start();
     diag_stream_start();
 
     const BaseType_t created = xTaskCreatePinnedToCore(
